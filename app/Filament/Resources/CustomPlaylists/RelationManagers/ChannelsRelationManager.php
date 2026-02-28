@@ -2,6 +2,7 @@
 
 namespace App\Filament\Resources\CustomPlaylists\RelationManagers;
 
+use App\Facades\SortFacade;
 use App\Filament\Resources\Channels\ChannelResource;
 use App\Models\Channel;
 use Filament\Actions\AttachAction;
@@ -261,7 +262,32 @@ class ChannelsRelationManager extends RelationManager
                 ...ChannelResource::getTableActions(),
             ], position: RecordActionsPosition::BeforeCells)
             ->toolbarActions([
-                ...ChannelResource::getTableBulkActions(addToCustom: false),
+                ...ChannelResource::getTableBulkActions(addToCustom: false, includeRecount: false),
+                BulkAction::make('recount_custom')
+                    ->label('Recount Channels')
+                    ->icon('heroicon-o-hashtag')
+                    ->schema([
+                        Forms\Components\TextInput::make('start')
+                            ->label('Start Number')
+                            ->numeric()
+                            ->default(1)
+                            ->required(),
+                    ])
+                    ->action(function (Collection $records, array $data) use ($ownerRecord): void {
+                        $start = (int) $data['start'];
+                        SortFacade::bulkRecountCustomPlaylistChannels($ownerRecord, $records, $start);
+                    })
+                    ->after(function () {
+                        Notification::make()
+                            ->success()
+                            ->title('Custom Playlist Channels Recounted')
+                            ->body('The selected channels were recounted for this custom playlist only.')
+                            ->send();
+                    })
+                    ->requiresConfirmation()
+                    ->modalIcon('heroicon-o-hashtag')
+                    ->modalDescription('Recount the selected channels only inside this custom playlist. The original channel numbers will not change.')
+                    ->modalSubmitActionLabel('Recount now'),
                 BulkAction::make('detach')
                     ->label('Detach Selected')
                     ->action(function (Collection $records) use ($ownerRecord): void {
