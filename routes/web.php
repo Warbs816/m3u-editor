@@ -212,6 +212,17 @@ Route::group(['middleware' => ['auth:sanctum']], function () {
         ->name('api.channels.stability-test');
 
     // Group API routes
+    Route::post('groups', [\App\Http\Controllers\GroupController::class, 'store'])
+        ->name('api.groups.store');
+    Route::patch('groups/{id}', [\App\Http\Controllers\GroupController::class, 'update'])
+        ->where('id', '[0-9]+')
+        ->name('api.groups.update');
+    Route::post('groups/{id}/move-channels', [\App\Http\Controllers\GroupController::class, 'moveChannels'])
+        ->where('id', '[0-9]+')
+        ->name('api.groups.move-channels');
+    Route::delete('groups/{id}', [\App\Http\Controllers\GroupController::class, 'destroy'])
+        ->where('id', '[0-9]+')
+        ->name('api.groups.destroy');
     Route::get('groups/get', [\App\Http\Controllers\GroupController::class, 'index'])
         ->name('api.groups.index');
     Route::get('groups/{id}', [\App\Http\Controllers\GroupController::class, 'show'])
