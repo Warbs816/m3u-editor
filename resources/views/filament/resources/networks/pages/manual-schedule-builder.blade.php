@@ -379,7 +379,7 @@
                 </p>
                 <select
                     x-model="copyTargetDate"
-                    class="w-full rounded-lg border-gray-200 dark:border-gray-600 dark:bg-gray-700 dark:text-white text-sm mb-5"
+                    class="w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm px-3 py-2 mb-5 shadow-sm focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-primary-500"
                 >
                     <template x-for="date in availableDates" :key="date.value">
                         <option :value="date.value" :disabled="date.value === currentDate" x-text="date.label"></option>
@@ -391,6 +391,60 @@
                     </button>
                     <button @click="copyDay()" class="rounded-lg px-4 py-2 text-sm font-medium text-white bg-primary-600 hover:bg-primary-500 shadow-sm transition">
                         Copy
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        {{-- Clear Day Confirmation Modal --}}
+        <div
+            x-show="showClearModal"
+            x-transition.opacity
+            @keydown.escape.window="showClearModal = false"
+            class="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm"
+        >
+            <div
+                x-transition.scale.95
+                @click.outside="showClearModal = false"
+                class="bg-white dark:bg-gray-800 rounded-xl shadow-2xl p-6 w-full max-w-sm border border-gray-200 dark:border-gray-700"
+            >
+                <h3 class="text-base font-semibold text-gray-900 dark:text-white mb-3">Clear Day</h3>
+                <p class="text-sm text-gray-500 dark:text-gray-400 mb-5">
+                    Remove all programmes from <strong class="text-gray-900 dark:text-white" x-text="currentDateDisplay"></strong>? This cannot be undone.
+                </p>
+                <div class="flex justify-end gap-2">
+                    <button @click="showClearModal = false" class="rounded-lg px-4 py-2 text-sm text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition">
+                        Cancel
+                    </button>
+                    <button @click="confirmClearDay()" class="rounded-lg px-4 py-2 text-sm font-medium text-white bg-danger-600 hover:bg-danger-500 shadow-sm transition">
+                        Clear
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        {{-- Apply Weekly Template Confirmation Modal --}}
+        <div
+            x-show="showTemplateModal"
+            x-transition.opacity
+            @keydown.escape.window="showTemplateModal = false"
+            class="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm"
+        >
+            <div
+                x-transition.scale.95
+                @click.outside="showTemplateModal = false"
+                class="bg-white dark:bg-gray-800 rounded-xl shadow-2xl p-6 w-full max-w-sm border border-gray-200 dark:border-gray-700"
+            >
+                <h3 class="text-base font-semibold text-gray-900 dark:text-white mb-3">Apply Weekly Template</h3>
+                <p class="text-sm text-gray-500 dark:text-gray-400 mb-5">
+                    Use the current week as a repeating template? Programmes beyond the first 7 days will be overwritten.
+                </p>
+                <div class="flex justify-end gap-2">
+                    <button @click="showTemplateModal = false" class="rounded-lg px-4 py-2 text-sm text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition">
+                        Cancel
+                    </button>
+                    <button @click="confirmApplyTemplate()" class="rounded-lg px-4 py-2 text-sm font-medium text-white bg-primary-600 hover:bg-primary-500 shadow-sm transition">
+                        Apply Template
                     </button>
                 </div>
             </div>

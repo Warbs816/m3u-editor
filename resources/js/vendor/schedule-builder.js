@@ -19,6 +19,8 @@ function scheduleBuilder(config) {
         showAllMedia: false,
         showCopyModal: false,
         copyTargetDate: '',
+        showClearModal: false,
+        showTemplateModal: false,
 
         // Now-playing status
         nowPlaying: null,
@@ -454,9 +456,12 @@ function scheduleBuilder(config) {
 
         // ── Day Actions ──────────────────────────────────────────────
 
-        async clearCurrentDay() {
-            if (!confirm('Clear all programmes for this day?')) return;
+        clearCurrentDay() {
+            this.showClearModal = true;
+        },
 
+        async confirmClearDay() {
+            this.showClearModal = false;
             this.loading = true;
             try {
                 const result = await this.$wire.clearDay(this.currentDate, this.timezone);
@@ -496,9 +501,12 @@ function scheduleBuilder(config) {
             }
         },
 
-        async applyWeeklyTemplate() {
-            if (!confirm('Apply the current week as a template? This will overwrite programmes beyond the first 7 days.')) return;
+        applyWeeklyTemplate() {
+            this.showTemplateModal = true;
+        },
 
+        async confirmApplyTemplate() {
+            this.showTemplateModal = false;
             this.loading = true;
             try {
                 await this.$wire.applyWeeklyTemplate();
