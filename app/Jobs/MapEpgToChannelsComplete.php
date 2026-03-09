@@ -75,8 +75,6 @@ class MapEpgToChannelsComplete implements ShouldQueue
         }
 
         // Invalidate cached EPG XML files for all playlists affected by this EPG source.
-        // Without this, Xtream API clients (e.g. TVMate) would serve stale XMLTV data
-        // that doesn't reflect the new EPG channel mappings until the cache TTL expires.
         $epg = $this->epg;
         foreach ($epg->getAllPlaylists() as $playlist) {
             EpgCacheService::clearPlaylistEpgCacheFile($playlist);
