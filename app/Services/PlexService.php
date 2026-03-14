@@ -450,7 +450,15 @@ class PlexService implements MediaServer
                     }
 
                     // If transcode options are provided use Plex's transcode endpoint
-                    if (! empty($transcodeOptions)) {
+                    // UNLESS the caller explicitly requests to skip Plex transcoding via the
+                    // 'skip_plex_transcode' flag. This allows direct file access for better
+                    // performance when Plex's remuxing creates buffering issues.
+                    $skipPlexTranscode = $transcodeOptions['skip_plex_transcode'] ?? false;
+
+                    // Check if there are actual transcode options (excluding internal flags)
+                    $hasTranscodeOptions = ! empty(array_diff_key($transcodeOptions, ['skip_plex_transcode' => null, 'session_id' => null]));
+
+                    if ($hasTranscodeOptions && ! $skipPlexTranscode) {
                         $videoBitrate = $transcodeOptions['video_bitrate'] ?? null;
                         $audioBitrate = $transcodeOptions['audio_bitrate'] ?? null;
                         $maxWidth = $transcodeOptions['max_width'] ?? null;

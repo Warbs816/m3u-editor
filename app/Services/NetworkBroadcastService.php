@@ -697,6 +697,12 @@ class NetworkBroadcastService
             $transcodeOptions['session_id'] = $sessionId;
         }
 
+        // For broadcasts, skip Plex's transcode endpoint and use direct file access.
+        // This avoids Plex's remuxing overhead which can cause segment 404 errors
+        // when Plex can't keep up with real-time demands. FFmpeg will handle all
+        // transcoding locally instead (much more reliable for live broadcasting).
+        $transcodeOptions['skip_plex_transcode'] = true;
+
         $streamUrl = $service->getDirectStreamUrl($request, $itemId, 'ts', $transcodeOptions);
 
         return $streamUrl;
