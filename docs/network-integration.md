@@ -17,7 +17,7 @@ This document explains the features and technical details of the Network broadca
 
 - Enable and start broadcasting for one network: `php artisan network:broadcast:ensure {network_uuid_or_id}`
 - Fix stale/failed broadcasts: `php artisan network:broadcast:heal [--dry-run]`
-- Clean up old HLS files: `php artisan hls:gc [--dry-run] [--threshold=<s>]`
+- Manually clean up old network segments: `php artisan network:cleanup-segments`
 - Regenerate schedules (hourly job exists): `php artisan networks:regenerate-schedules`
 
 **Scheduled Broadcasts:**
@@ -27,7 +27,7 @@ This document explains the features and technical details of the Network broadca
 - The broadcast worker will automatically start the stream when the scheduled time is reached
 - Scheduled networks show status "Scheduled" with countdown in the networks list
 
-Tip: Use `--dry-run` on `hls:gc` to preview deletions before actual cleanup. ✅
+Tip: All HLS and broadcast segment GC runs automatically inside the proxy. Use `php artisan network:cleanup-segments` for a manual one-off sweep of old network segments. ✅
 
 ---
 
@@ -37,7 +37,7 @@ Tip: Use `--dry-run` on `hls:gc` to preview deletions before actual cleanup. ✅
 - **Persisted broadcast reference**: When a broadcast starts we persist `broadcast_programme_id` and `broadcast_initial_offset_seconds` on the Network so restarts can resume at the right position.
 - **Real seeking**: The broadcast uses FFmpeg input-level seeking (`-ss` before `-i`) to ensure the stream actually begins at the calculated offset. The media server `StartTimeTicks` parameter is still used as a hint when fetching the media.
 - **Resilience & healing**: If FFmpeg dies, the heal command clears stale PID entries and attempts to restart using the persisted reference.
-- **HLS Garbage Collection**: A scheduled & manual `hls:gc` command deletes old `.ts` and stale playlist files to prevent disk growth.
+- **HLS Garbage Collection**: The proxy runs background GC tasks automatically — one for streaming HLS temp dirs and one for broadcast segment directories. Use `php artisan network:cleanup-segments` for a manual sweep.
 - **Xtream API support for networks**: `player_api.php` endpoints are supported so IPTV players can list networks and fetch EPG; `/live/` stream requests redirect to the network HLS URL.
 
 ---
