@@ -1220,6 +1220,7 @@ class PlaylistResource extends Resource
                 ->description('Pool multiple Xtream accounts from this provider to increase concurrent stream capacity.')
                 ->icon('heroicon-o-user-group')
                 ->collapsible()
+                ->compact()
                 ->collapsed(fn (?Playlist $record): bool => ! ($record?->profiles_enabled ?? false))
                 ->hidden(fn (Get $get): bool => ! $get('xtream'))
                 ->schema([
@@ -1229,7 +1230,7 @@ class PlaylistResource extends Resource
                         ->schema([
                             Toggle::make('profiles_enabled')
                                 ->label('Enable Provider Profiles')
-                                ->helperText('When enabled, proxy mode is required for accurate connection tracking.')
+                                ->helperText('NOTE: When enabled, proxy mode is required for accurate connection tracking.')
                                 ->live()
                                 ->afterStateUpdated(function (Set $set, $state) {
                                     if ($state) {
@@ -1279,7 +1280,7 @@ class PlaylistResource extends Resource
                                 ->default(false),
                         ]),
 
-                    Grid::make()
+                    Fieldset::make('Primary Profile')
                         ->columns(2)
                         ->visible(fn (Get $get): bool => $get('profiles_enabled'))
                         ->schema([
