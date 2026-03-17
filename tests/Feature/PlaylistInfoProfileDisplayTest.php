@@ -36,10 +36,11 @@ beforeEach(function () {
     // Force array cache driver to avoid Redis dependency
     config(['cache.default' => 'array']);
 
-    // Mock proxy API to return 2 active clients by default
+    // Mock proxy API to return 2 active streams by default
     Http::fake([
         '*/streams/by-metadata*' => Http::response([
             'matching_streams' => [],
+            'total_matching' => 2,
             'total_clients' => 2,
         ]),
     ]);
