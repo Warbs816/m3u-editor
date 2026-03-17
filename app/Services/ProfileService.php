@@ -159,10 +159,13 @@ class ProfileService
             }
         }
 
+        $connectionCounts = [];
+
         foreach ($profiles as $profile) {
-            $activeConnections = static::getEffectiveConnectionCount($profile);
+            $connectionCounts[$profile->id] = static::getEffectiveConnectionCount($profile);
+            $activeConnections = $connectionCounts[$profile->id];
             $maxConnections = $profile->effective_max_streams;
-            $hasCapacity = static::hasCapacity($profile);
+            $hasCapacity = $activeConnections < $maxConnections;
 
             Log::debug('Checking profile capacity', [
                 'profile_id' => $profile->id,
@@ -190,12 +193,12 @@ class ProfileService
         // profile even though all are at capacity. This allows streams to start when
         // available_streams hasn't been reached but provider limits have.
         if ($forceSelect && $profiles->isNotEmpty()) {
-            $best = $profiles->sortBy(fn ($p) => static::getEffectiveConnectionCount($p))->first();
+            $best = $profiles->sortBy(fn ($p) => $connectionCounts[$p->id])->first();
 
             Log::info('Force-selected profile (bypass provider limits)', [
                 'profile_id' => $best->id,
                 'profile_name' => $best->name,
-                'active_connections' => static::getEffectiveConnectionCount($best),
+                'active_connections' => $connectionCounts[$best->id],
                 'max_connections' => $best->effective_max_streams,
                 'playlist_id' => $playlist->id,
             ]);
