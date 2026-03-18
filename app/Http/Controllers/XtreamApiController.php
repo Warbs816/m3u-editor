@@ -18,7 +18,6 @@ use App\Models\PlaylistAuth;
 use App\Models\PlaylistViewer;
 use App\Models\Series;
 use App\Models\ViewerWatchProgress;
-use App\Http\Controllers\EpgGenerateController;
 use App\Services\EpgCacheService;
 use App\Services\LogoCacheService;
 use App\Services\M3uProxyService;
