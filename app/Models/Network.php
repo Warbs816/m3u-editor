@@ -238,8 +238,8 @@ class Network extends Model
      */
     public function getBroadcastConnectionWindowSeconds(): int
     {
-        $disconnectSeconds = (int) config('proxy.broadcast_on_demand_disconnect_seconds', 45);
-        $overlapSeconds = (int) config('proxy.broadcast_on_demand_overlap_seconds', 15);
+        $disconnectSeconds = (int) config('proxy.broadcast_on_demand_disconnect_seconds', 120);
+        $overlapSeconds = (int) config('proxy.broadcast_on_demand_overlap_seconds', 30);
 
         return max(1, $disconnectSeconds + $overlapSeconds);
     }
