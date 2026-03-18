@@ -223,9 +223,6 @@ class PlaylistAliasResource extends Resource
     public static function getForm(): array
     {
         return [
-            // Forms\Components\Toggle::make('enabled')
-            //     ->default(true)
-            //     ->columnSpan('full'),
             Grid::make()
                 ->columns(2)
                 ->columnSpan('full')

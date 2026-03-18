@@ -23,7 +23,6 @@ class PlaylistAlias extends Model
     protected $casts = [
         'xtream_config' => 'array',
         'proxy_options' => 'array',
-        'enabled' => 'boolean',
         'enable_proxy' => 'boolean',
         'priority' => 'integer',
         'expires_at' => 'datetime',
