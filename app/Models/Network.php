@@ -247,7 +247,7 @@ class Network extends Model
     /**
      * Check if the network should remain in waiting-for-connection state.
      */
-    public function isWaitingForConnection(int $windowSeconds = 0): bool
+    public function isWaitingForConnection(?int $windowSeconds = null): bool
     {
         if (! $this->isOnDemandBroadcast()) {
             return false;
@@ -261,7 +261,7 @@ class Network extends Model
             return false;
         }
 
-        $effectiveWindowSeconds = $windowSeconds > 0
+        $effectiveWindowSeconds = $windowSeconds && $windowSeconds > 0
             ? $windowSeconds
             : $this->getBroadcastConnectionWindowSeconds();
 
