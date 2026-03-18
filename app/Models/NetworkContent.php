@@ -2,10 +2,12 @@
 
 namespace App\Models;
 
+use App\Jobs\RegenerateNetworkSchedule;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\MorphTo;
+use Illuminate\Support\Facades\Log;
 
 class NetworkContent extends Model
 {
@@ -37,7 +39,9 @@ class NetworkContent extends Model
     {
         parent::boot();
 
-        // When content is created, regenerate schedule if needed
+        // When content is created, queue a debounced schedule regeneration.
+        // ShouldBeUnique on the job ensures bulk imports collapse into a single
+        // regeneration rather than firing one per inserted row.
         static::created(function (NetworkContent $networkContent) {
             $network = $networkContent->network;
 
@@ -45,42 +49,15 @@ class NetworkContent extends Model
                 return;
             }
 
-            // Only regenerate for sequential or shuffle schedules
             if (! in_array($network->schedule_type, ['sequential', 'shuffle'])) {
-                \Illuminate\Support\Facades\Log::debug('Skipping schedule regeneration for manual schedule network', [
-                    'network_id' => $network->id,
-                    'network_name' => $network->name,
-                    'schedule_type' => $network->schedule_type,
-                ]);
-
                 return;
             }
 
-            // Check if auto-regeneration is enabled
             if ($network->auto_regenerate_schedule === false) {
-                \Illuminate\Support\Facades\Log::debug('Skipping schedule regeneration (auto_regenerate disabled)', [
-                    'network_id' => $network->id,
-                    'network_name' => $network->name,
-                ]);
-
                 return;
             }
 
-            \Illuminate\Support\Facades\Log::info('Content added to network, regenerating schedule', [
-                'network_id' => $network->id,
-                'network_name' => $network->name,
-                'schedule_type' => $network->schedule_type,
-                'content_type' => $networkContent->contentable_type,
-            ]);
-
-            try {
-                app(\App\Services\NetworkScheduleService::class)->generateSchedule($network);
-            } catch (\Throwable $e) {
-                \Illuminate\Support\Facades\Log::error('Failed to regenerate schedule after content addition', [
-                    'network_id' => $network->id,
-                    'error' => $e->getMessage(),
-                ]);
-            }
+            RegenerateNetworkSchedule::dispatch($network->id)->delay(3);
         });
 
         // When content is deleted, check if network has any remaining content
@@ -95,7 +72,7 @@ class NetworkContent extends Model
             $remainingContent = $network->networkContent()->count();
 
             if ($remainingContent === 0) {
-                \Illuminate\Support\Facades\Log::info('Last content removed from network, triggering cleanup', [
+                Log::info('Last content removed from network, triggering cleanup', [
                     'network_id' => $network->id,
                     'network_name' => $network->name,
                 ]);
@@ -105,7 +82,7 @@ class NetworkContent extends Model
                     try {
                         app(\App\Services\NetworkBroadcastService::class)->stop($network);
                     } catch (\Throwable $e) {
-                        \Illuminate\Support\Facades\Log::warning('Failed to stop broadcast after content removal', [
+                        Log::warning('Failed to stop broadcast after content removal', [
                             'network_id' => $network->id,
                             'error' => $e->getMessage(),
                         ]);
@@ -120,7 +97,7 @@ class NetworkContent extends Model
                 try {
                     app(\App\Services\NetworkEpgService::class)->generateEpg($network);
                 } catch (\Throwable $e) {
-                    \Illuminate\Support\Facades\Log::warning('Failed to regenerate EPG after content removal', [
+                    Log::warning('Failed to regenerate EPG after content removal', [
                         'network_id' => $network->id,
                         'error' => $e->getMessage(),
                     ]);

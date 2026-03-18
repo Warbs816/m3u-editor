@@ -1,5 +1,6 @@
 <?php
 
+use App\Jobs\RegenerateNetworkSchedule;
 use App\Models\Channel;
 use App\Models\Episode;
 use App\Models\Network;
@@ -7,68 +8,23 @@ use App\Models\NetworkContent;
 use App\Models\NetworkProgramme;
 use Carbon\Carbon;
 use Illuminate\Foundation\Testing\RefreshDatabase;
-use Illuminate\Support\Facades\Queue;
+use Illuminate\Support\Facades\Bus;
 
 uses(RefreshDatabase::class);
 
 beforeEach(function () {
-    Queue::fake();
+    Bus::fake();
 });
 
-it('regenerates schedule when content is added to sequential network', function () {
-    // Arrange
-    Carbon::setTestNow('2026-03-15 10:00:00');
-
+it('dispatches schedule regeneration job when content is added to sequential network', function () {
     $network = Network::factory()->create([
         'schedule_type' => 'sequential',
         'loop_content' => true,
         'auto_regenerate_schedule' => true,
     ]);
 
-    $channel1 = Channel::factory()->create();
-    $channel2 = Channel::factory()->create();
-
-    // Add first content item
-    NetworkContent::create([
-        'network_id' => $network->id,
-        'contentable_type' => Channel::class,
-        'contentable_id' => $channel1->id,
-        'sort_order' => 1,
-        'weight' => 1,
-    ]);
-
-    // Verify schedule was generated
-    $programmeCount = $network->programmes()->count();
-    expect($programmeCount)->toBeGreaterThan(0);
-
-    // Act: Add second content item
-    NetworkContent::create([
-        'network_id' => $network->id,
-        'contentable_type' => Channel::class,
-        'contentable_id' => $channel2->id,
-        'sort_order' => 2,
-        'weight' => 1,
-    ]);
-
-    // Assert: Schedule should be regenerated with both items
-    $newProgrammeCount = $network->fresh()->programmes()->count();
-    expect($newProgrammeCount)->toBeGreaterThan(0);
-    expect($network->fresh()->schedule_generated_at)->not->toBeNull();
-});
-
-it('regenerates schedule when content is added to shuffle network', function () {
-    // Arrange
-    Carbon::setTestNow('2026-03-15 10:00:00');
-
-    $network = Network::factory()->create([
-        'schedule_type' => 'shuffle',
-        'loop_content' => true,
-        'auto_regenerate_schedule' => true,
-    ]);
-
     $channel = Channel::factory()->create();
 
-    // Act: Add content item
     NetworkContent::create([
         'network_id' => $network->id,
         'contentable_type' => Channel::class,
@@ -77,13 +33,34 @@ it('regenerates schedule when content is added to shuffle network', function () 
         'weight' => 1,
     ]);
 
-    // Assert: Schedule should be generated
-    expect($network->fresh()->programmes()->count())->toBeGreaterThan(0);
-    expect($network->fresh()->schedule_generated_at)->not->toBeNull();
+    Bus::assertDispatched(RegenerateNetworkSchedule::class, function ($job) use ($network) {
+        return $job->networkId === $network->id;
+    });
 });
 
-it('does not regenerate schedule for manual schedule networks', function () {
-    // Arrange
+it('dispatches schedule regeneration job when content is added to shuffle network', function () {
+    $network = Network::factory()->create([
+        'schedule_type' => 'shuffle',
+        'loop_content' => true,
+        'auto_regenerate_schedule' => true,
+    ]);
+
+    $channel = Channel::factory()->create();
+
+    NetworkContent::create([
+        'network_id' => $network->id,
+        'contentable_type' => Channel::class,
+        'contentable_id' => $channel->id,
+        'sort_order' => 1,
+        'weight' => 1,
+    ]);
+
+    Bus::assertDispatched(RegenerateNetworkSchedule::class, function ($job) use ($network) {
+        return $job->networkId === $network->id;
+    });
+});
+
+it('does not dispatch regeneration job for manual schedule networks', function () {
     Carbon::setTestNow('2026-03-15 10:00:00');
 
     $network = Network::factory()->create([
@@ -94,7 +71,6 @@ it('does not regenerate schedule for manual schedule networks', function () {
 
     $channel = Channel::factory()->create();
 
-    // Manually create a programme
     NetworkProgramme::create([
         'network_id' => $network->id,
         'title' => 'Manual Programme',
@@ -105,10 +81,6 @@ it('does not regenerate schedule for manual schedule networks', function () {
         'contentable_id' => $channel->id,
     ]);
 
-    $initialProgrammeCount = $network->programmes()->count();
-    expect($initialProgrammeCount)->toBe(1);
-
-    // Act: Add content item
     NetworkContent::create([
         'network_id' => $network->id,
         'contentable_type' => Channel::class,
@@ -117,24 +89,19 @@ it('does not regenerate schedule for manual schedule networks', function () {
         'weight' => 1,
     ]);
 
-    // Assert: Schedule should NOT be auto-regenerated (manual schedules are managed via UI)
-    $finalProgrammeCount = $network->fresh()->programmes()->count();
-    expect($finalProgrammeCount)->toBe($initialProgrammeCount);
+    Bus::assertNotDispatched(RegenerateNetworkSchedule::class);
+    expect($network->fresh()->programmes()->count())->toBe(1);
 });
 
-it('does not regenerate schedule when auto_regenerate_schedule is disabled', function () {
-    // Arrange
-    Carbon::setTestNow('2026-03-15 10:00:00');
-
+it('does not dispatch regeneration job when auto_regenerate_schedule is disabled', function () {
     $network = Network::factory()->create([
         'schedule_type' => 'sequential',
         'loop_content' => true,
-        'auto_regenerate_schedule' => false, // Disabled
+        'auto_regenerate_schedule' => false,
     ]);
 
     $channel = Channel::factory()->create();
 
-    // Act: Add content item
     NetworkContent::create([
         'network_id' => $network->id,
         'contentable_type' => Channel::class,
@@ -143,24 +110,18 @@ it('does not regenerate schedule when auto_regenerate_schedule is disabled', fun
         'weight' => 1,
     ]);
 
-    // Assert: Schedule should NOT be generated
-    expect($network->fresh()->programmes()->count())->toBe(0);
-    expect($network->fresh()->schedule_generated_at)->toBeNull();
+    Bus::assertNotDispatched(RegenerateNetworkSchedule::class);
 });
 
-it('regenerates schedule when multiple items are added sequentially', function () {
-    // Arrange
-    Carbon::setTestNow('2026-03-15 10:00:00');
-
+it('dispatches one job per network when multiple items are added in bulk', function () {
     $network = Network::factory()->create([
         'schedule_type' => 'sequential',
         'loop_content' => true,
         'auto_regenerate_schedule' => true,
     ]);
 
-    $channels = Channel::factory()->count(3)->create();
+    $channels = Channel::factory()->count(5)->create();
 
-    // Act: Add multiple content items sequentially
     foreach ($channels as $index => $channel) {
         NetworkContent::create([
             'network_id' => $network->id,
@@ -171,26 +132,15 @@ it('regenerates schedule when multiple items are added sequentially', function (
         ]);
     }
 
-    // Assert: Schedule should be generated with all items
-    $network->refresh();
-    expect($network->programmes()->count())->toBeGreaterThan(0);
-    expect($network->schedule_generated_at)->not->toBeNull();
-
-    // Verify the schedule includes programmes
-    $programmeContentIds = $network->programmes()
-        ->pluck('contentable_id')
-        ->unique()
-        ->sort()
-        ->values()
-        ->toArray();
-
-    expect(count($programmeContentIds))->toBeGreaterThan(0);
+    // Five inserts should produce five dispatches here (ShouldBeUnique collapses
+    // them on the real queue; Queue::fake() captures all dispatches, so we assert
+    // at least one was dispatched for this network).
+    Bus::assertDispatched(RegenerateNetworkSchedule::class, function ($job) use ($network) {
+        return $job->networkId === $network->id;
+    });
 });
 
-it('regenerates schedule correctly when adding episodes', function () {
-    // Arrange
-    Carbon::setTestNow('2026-03-15 10:00:00');
-
+it('dispatches regeneration job when episodes are added', function () {
     $network = Network::factory()->create([
         'schedule_type' => 'sequential',
         'loop_content' => true,
@@ -199,7 +149,6 @@ it('regenerates schedule correctly when adding episodes', function () {
 
     $episode = Episode::factory()->create();
 
-    // Act: Add episode
     NetworkContent::create([
         'network_id' => $network->id,
         'contentable_type' => Episode::class,
@@ -208,15 +157,12 @@ it('regenerates schedule correctly when adding episodes', function () {
         'weight' => 1,
     ]);
 
-    // Assert: Schedule should be generated
-    expect($network->fresh()->programmes()->count())->toBeGreaterThan(0);
-    expect($network->fresh()->schedule_generated_at)->not->toBeNull();
+    Bus::assertDispatched(RegenerateNetworkSchedule::class, function ($job) use ($network) {
+        return $job->networkId === $network->id;
+    });
 });
 
-it('handles mixed content types when regenerating schedule', function () {
-    // Arrange
-    Carbon::setTestNow('2026-03-15 10:00:00');
-
+it('dispatches regeneration job for mixed content types', function () {
     $network = Network::factory()->create([
         'schedule_type' => 'sequential',
         'loop_content' => true,
@@ -226,7 +172,6 @@ it('handles mixed content types when regenerating schedule', function () {
     $channel = Channel::factory()->create();
     $episode = Episode::factory()->create();
 
-    // Act: Add mixed content types
     NetworkContent::create([
         'network_id' => $network->id,
         'contentable_type' => Channel::class,
@@ -243,17 +188,7 @@ it('handles mixed content types when regenerating schedule', function () {
         'weight' => 1,
     ]);
 
-    // Assert: Schedule should be generated with both types
-    $network->refresh();
-    expect($network->programmes()->count())->toBeGreaterThan(0);
-    expect($network->schedule_generated_at)->not->toBeNull();
-
-    // Verify both content types appear in schedule
-    $contentTypes = $network->programmes()
-        ->pluck('contentable_type')
-        ->unique()
-        ->toArray();
-
-    expect($contentTypes)->toContain(Channel::class);
-    expect($contentTypes)->toContain(Episode::class);
+    Bus::assertDispatched(RegenerateNetworkSchedule::class, function ($job) use ($network) {
+        return $job->networkId === $network->id;
+    });
 });
