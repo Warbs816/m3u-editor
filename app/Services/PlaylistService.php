@@ -68,12 +68,35 @@ class PlaylistService
 
         // Manually construct base URL to ensure port is included (if not using HTTPS)
         $url = rtrim(config('app.url'), '/');
-        $port = config('app.port');
+        $port = static::getEffectivePort();
         if (! Str::contains($url, 'https') && $port) {
             $url .= ':'.$port;
         }
 
         return $url.($path ? '/'.ltrim($path, '/') : '');
+    }
+
+    /**
+     * Get the effective port for IPTV client-facing URLs.
+     *
+     * When the Xtream dedicated port feature is enabled and the restrict
+     * toggle is on, all IPTV URLs should point to the Xtream port.
+     */
+    public static function getEffectivePort(): ?string
+    {
+        $port = config('app.port');
+
+        if (config('xtream.enabled')) {
+            try {
+                $settings = app(GeneralSettings::class);
+                if ($settings->xtream_restrict_to_dedicated_port) {
+                    return (string) config('xtream.port');
+                }
+            } catch (\Exception $e) {
+            }
+        }
+
+        return $port;
     }
 
     /**
@@ -115,29 +138,29 @@ class PlaylistService
             $epgData = $shortUrls->get('epg');
             $epgZipData = $shortUrls->get('epg_zip');
 
-            $m3uUrl = $m3uData ? url('/s/'.$m3uData['key']) : null;
+            $m3uUrl = $m3uData ? static::getBaseUrl('/s/'.$m3uData['key']) : null;
             // For HDHR short URLs we append the auth path (if present). The short URL forwarding
             // will preserve the extra path so the final redirect becomes /{uuid}/hdhr/{user}/{pass}
-            $hdhrUrl = $hdhrData ? url('/s/'.$hdhrData['key'].$hdhrAuthPath) : null;
-            $epgUrl = $epgData ? url('/s/'.$epgData['key']) : null;
+            $hdhrUrl = $hdhrData ? static::getBaseUrl('/s/'.$hdhrData['key'].$hdhrAuthPath) : null;
+            $epgUrl = $epgData ? static::getBaseUrl('/s/'.$epgData['key']) : null;
 
             // Since zipped url was added later, it might not be present in the short urls
             // Default to the route if not found
             $epgZipUrl = $epgZipData
-                ? url('/s/'.$epgZipData['key'])
-                : route('epg.generate.compressed', ['uuid' => $playlist->uuid]);
+                ? static::getBaseUrl('/s/'.$epgZipData['key'])
+                : static::getBaseUrl(route('epg.generate.compressed', ['uuid' => $playlist->uuid], false));
         } else {
-            $m3uUrl = route('playlist.generate', ['uuid' => $playlist->uuid]);
-            $epgUrl = route('epg.generate', ['uuid' => $playlist->uuid]);
-            $epgZipUrl = route('epg.generate.compressed', ['uuid' => $playlist->uuid]);
+            $m3uUrl = static::getBaseUrl(route('playlist.generate', ['uuid' => $playlist->uuid], false));
+            $epgUrl = static::getBaseUrl(route('epg.generate', ['uuid' => $playlist->uuid], false));
+            $epgZipUrl = static::getBaseUrl(route('epg.generate.compressed', ['uuid' => $playlist->uuid], false));
             if ($hdhrAuthPath) {
-                $hdhrUrl = route('playlist.hdhr.overview.auth', [
+                $hdhrUrl = static::getBaseUrl(route('playlist.hdhr.overview.auth', [
                     'uuid' => $playlist->uuid,
                     'username' => $playlistAuth->username,
                     'password' => $playlistAuth->password,
-                ]);
+                ], false));
             } else {
-                $hdhrUrl = route('playlist.hdhr.overview', ['uuid' => $playlist->uuid]);
+                $hdhrUrl = static::getBaseUrl(route('playlist.hdhr.overview', ['uuid' => $playlist->uuid], false));
             }
         }
 
@@ -185,7 +208,7 @@ class PlaylistService
 
         // Return the results
         return [
-            'url' => url(''), // Base URL of the application
+            'url' => static::getBaseUrl(),
             ...$auth,
         ];
     }

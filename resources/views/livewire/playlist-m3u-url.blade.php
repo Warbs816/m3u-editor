@@ -2,7 +2,13 @@
 @php($m3uUrl = $urls['m3u'])
 @php($hdhrUrl = $urls['hdhr'])
 @php($publicUrl = url('/playlist/v/' . $this->record->uuid))
+@php($xtreamRestricted = config('xtream.enabled') && app(\App\Settings\GeneralSettings::class)->xtream_restrict_to_dedicated_port)
 <div class="space-y-6">
+    @if($xtreamRestricted)
+        <div class="rounded-lg bg-warning-50 dark:bg-warning-400/10 p-3 text-sm text-warning-600 dark:text-warning-400 ring-1 ring-warning-600/10 dark:ring-warning-400/20">
+            These URLs use the dedicated Xtream port ({{ config('xtream.port') }}). They are only accessible on that port.
+        </div>
+    @endif
     <div>
         <span class="text-sm font-medium leading-6 text-gray-950 dark:text-white">
             M3U URL

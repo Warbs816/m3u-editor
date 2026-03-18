@@ -1,6 +1,10 @@
 <?php
 
 return [
+    // Xtream-only dedicated port feature
+    'enabled' => env('XTREAM_ONLY_ENABLED', false),
+    'port' => env('XTREAM_PORT', 36401),
+
     // Default Movie and Series folders
     // These are used to create the folder structure for the strm files
     'dirs' => [

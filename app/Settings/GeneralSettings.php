@@ -223,6 +223,9 @@ class GeneralSettings extends Settings
     // Allowed playlist URL settings
     public ?array $allowed_urls = null;
 
+    // Xtream dedicated port restriction
+    public ?bool $xtream_restrict_to_dedicated_port = false;
+
     public static function group(): string
     {
         return 'general';

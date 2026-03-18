@@ -19,6 +19,7 @@ return Application::configure(basePath: dirname(__DIR__))
             ])
             ->alias([
                 'proxy.throttle' => \App\Http\Middleware\ProxyRateLimitMiddleware::class,
+                'xtream.restrict' => \App\Http\Middleware\EnsureXtreamRouteAllowed::class,
             ])
             ->redirectGuestsTo('login')
             ->trustProxies(at: ['*'])

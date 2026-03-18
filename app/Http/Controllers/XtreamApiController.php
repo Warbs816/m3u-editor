@@ -18,6 +18,7 @@ use App\Models\PlaylistAuth;
 use App\Models\PlaylistViewer;
 use App\Models\Series;
 use App\Models\ViewerWatchProgress;
+use App\Http\Controllers\EpgGenerateController;
 use App\Services\EpgCacheService;
 use App\Services\LogoCacheService;
 use App\Services\M3uProxyService;
@@ -1890,8 +1891,8 @@ class XtreamApiController extends Controller
             return response()->json(['error' => 'Unauthorized'], 401);
         }
 
-        // If here, user is authenticated
-        return redirect()->to(route('epg.generate', ['uuid' => $playlist->uuid]));
+        // Serve EPG directly instead of redirecting, so it works on the Xtream-only port
+        return app(EpgGenerateController::class)($playlist->uuid);
     }
 
     /**

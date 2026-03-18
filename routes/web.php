@@ -60,122 +60,12 @@ Route::get('/phpinfo', function () {
     }
 });
 
-/*
- * Logo proxy route - cache and serve remote logos
- */
-Route::get('/logo-proxy/{encodedUrl}/{filename?}', [LogoProxyController::class, 'serveLogo'])
-    ->where('encodedUrl', '[A-Za-z0-9\-_=]+')
-    ->where('filename', '.*')
-    ->name('logo.proxy');
-
 /**
  * Asset routes
  */
 Route::get('/assets/{asset}/preview', AssetPreviewController::class)
     ->middleware(['auth'])
     ->name('assets.preview');
-
-Route::get('/logo-repository', [LogoRepositoryController::class, 'index'])
-    ->name('logo.repository');
-Route::get('/logo-repository/index.json', [LogoRepositoryController::class, 'index'])
-    ->name('logo.repository.index');
-Route::get('/logo-repository/logos/{filename}', [LogoRepositoryController::class, 'show'])
-    ->where('filename', '.*')
-    ->name('logo.repository.file');
-
-/*
- * Playlist/EPG output routes
- */
-
-// Generate M3U playlist from the playlist configuration
-Route::get('/{uuid}/playlist.m3u', PlaylistGenerateController::class)
-    ->name('playlist.generate');
-
-// Auth-aware HDHR routes (path-based auth to support clients that ignore query string auth)
-Route::get('/{uuid}/hdhr/{username}/{password}/device.xml', [\App\Http\Controllers\PlaylistGenerateController::class, 'hdhr'])
-    ->name('playlist.hdhr.auth_device');
-Route::get('/{uuid}/hdhr/{username}/{password}', [\App\Http\Controllers\PlaylistGenerateController::class, 'hdhrOverview'])
-    ->name('playlist.hdhr.overview.auth');
-Route::get('/{uuid}/hdhr/{username}/{password}/discover.json', [\App\Http\Controllers\PlaylistGenerateController::class, 'hdhrDiscover'])
-    ->name('playlist.hdhr.discover.auth');
-Route::get('/{uuid}/hdhr/{username}/{password}/lineup.json', [\App\Http\Controllers\PlaylistGenerateController::class, 'hdhrLineup'])
-    ->name('playlist.hdhr.lineup.auth');
-Route::get('/{uuid}/hdhr/{username}/{password}/lineup_status.json', [\App\Http\Controllers\PlaylistGenerateController::class, 'hdhrLineupStatus'])
-    ->name('playlist.hdhr.lineup_status.auth');
-
-// Legacy/non-auth HDHR routes (keep for backwards compatibility and query-var auth)
-Route::get('/{uuid}/hdhr/device.xml', [\App\Http\Controllers\PlaylistGenerateController::class, 'hdhr'])
-    ->name('playlist.hdhr');
-Route::get('/{uuid}/hdhr', [\App\Http\Controllers\PlaylistGenerateController::class, 'hdhrOverview'])
-    ->name('playlist.hdhr.overview');
-Route::get('/{uuid}/hdhr/discover.json', [\App\Http\Controllers\PlaylistGenerateController::class, 'hdhrDiscover'])
-    ->name('playlist.hdhr.discover');
-Route::get('/{uuid}/hdhr/lineup.json', [\App\Http\Controllers\PlaylistGenerateController::class, 'hdhrLineup'])
-    ->name('playlist.hdhr.lineup');
-Route::get('/{uuid}/hdhr/lineup_status.json', [\App\Http\Controllers\PlaylistGenerateController::class, 'hdhrLineupStatus'])
-    ->name('playlist.hdhr.lineup_status');
-
-// Generate EPG playlist from the playlist configuration
-Route::get('/{uuid}/epg.xml', EpgGenerateController::class)
-    ->name('epg.generate');
-Route::get('/{uuid}/epg.xml.gz', [EpgGenerateController::class, 'compressed'])
-    ->name('epg.generate.compressed');
-
-// Serve the EPG file
-Route::get('epgs/{uuid}/epg.xml', EpgFileController::class)
-    ->name('epg.file');
-
-// Network EPG routes
-Route::get('/network/{network}/epg.xml', [NetworkEpgController::class, 'show'])
-    ->name('network.epg');
-Route::get('/network/{network}/epg.xml.gz', [NetworkEpgController::class, 'compressed'])
-    ->name('network.epg.compressed');
-
-// Network stream routes
-Route::get('/network/{network}/stream.{container}', [NetworkStreamController::class, 'stream'])
-    ->name('network.stream')
-    ->where('container', 'ts|mp4|mkv|avi|webm|mov');
-Route::get('/network/{network}/now-playing', [NetworkStreamController::class, 'nowPlaying'])
-    ->name('network.now-playing');
-Route::get('/network/{network}/playlist.m3u', [NetworkPlaylistController::class, 'single'])
-    ->name('network.playlist');
-
-// Networks (plural) playlist routes - all user's networks
-Route::get('/networks/{user}/playlist.m3u', NetworkPlaylistController::class)
-    ->name('networks.playlist');
-Route::get('/networks/{user}/epg.xml', [NetworkPlaylistController::class, 'epg'])
-    ->name('networks.epg');
-
-// Media Integration Networks playlist - networks for a specific media server integration
-Route::get('/media-integration/{integration}/networks/playlist.m3u', [NetworkPlaylistController::class, 'forIntegration'])
-    ->name('media-integration.networks.playlist');
-Route::get('/media-integration/{integration}/networks/epg.xml', [NetworkPlaylistController::class, 'epgForIntegration'])
-    ->name('media-integration.networks.epg');
-
-// Network HLS broadcast routes (for continuous live broadcasting)
-Route::get('/network/{network}/live.m3u8', [\App\Http\Controllers\NetworkHlsController::class, 'playlist'])
-    ->name('network.hls.playlist');
-Route::get('/network/{network}/{segment}.ts', [\App\Http\Controllers\NetworkHlsController::class, 'segment'])
-    ->name('network.hls.segment')
-    ->where('segment', 'live[0-9]+');
-
-/*
- * Proxy routes (redirects to m3u-proxy API)
- */
-
-// Deprecated route for episode - redirect to m3u-proxy API
-Route::get('/shared/stream/e/{encodedId}.{format?}', function (string $encodedId) {
-    $id = base64_decode($encodedId);
-
-    return redirect()->route('m3u-proxy.episode', ['id' => $id]);
-})->name('shared.stream.episode');
-
-// Deprecated route for channel - redirect to m3u-proxy API
-Route::get('/shared/stream/{encodedId}.{format?}', function (string $encodedId) {
-    $id = base64_decode($encodedId);
-
-    return redirect()->route('m3u-proxy.channel', ['id' => $id]);
-})->name('shared.stream.channel');
 
 /*
  * API routes
@@ -272,64 +162,181 @@ Route::group(['prefix' => 'epg'], function () {
 });
 
 /*
- * Xtream API endpoints at root
+ * IPTV client-facing routes
+ * When "Restrict to dedicated Xtream port" is enabled, these routes are only
+ * accessible via the dedicated Xtream nginx port (identified by X-Xtream-Request header).
  */
+Route::middleware('xtream.restrict')->group(function () {
+    /*
+     * Logo proxy route - cache and serve remote logos
+     */
+    Route::get('/logo-proxy/{encodedUrl}/{filename?}', [LogoProxyController::class, 'serveLogo'])
+        ->where('encodedUrl', '[A-Za-z0-9\-_=]+')
+        ->where('filename', '.*')
+        ->name('logo.proxy');
 
-// Main Xtream API endpoint at /player_api.php and /get.php
-Route::match(['get', 'post'], '/player_api.php', [XtreamApiController::class, 'handle'])->name('xtream.api.player');
-Route::match(['get', 'post'], '/get.php', [XtreamApiController::class, 'handle'])->name('xtream.api.get');
-Route::get('/xmltv.php', [XtreamApiController::class, 'epg'])->name('xtream.api.epg');
+    Route::get('/logo-repository', [LogoRepositoryController::class, 'index'])
+        ->name('logo.repository');
+    Route::get('/logo-repository/index.json', [LogoRepositoryController::class, 'index'])
+        ->name('logo.repository.index');
+    Route::get('/logo-repository/logos/{filename}', [LogoRepositoryController::class, 'show'])
+        ->where('filename', '.*')
+        ->name('logo.repository.file');
 
-// Stream endpoints
-Route::get('/live/{username}/{password}/{streamId}.{format?}', [App\Http\Controllers\XtreamStreamController::class, 'handleLive'])
-    ->name('xtream.stream.live.root');
-Route::get('/movie/{username}/{password}/{streamId}.{format?}', [App\Http\Controllers\XtreamStreamController::class, 'handleVod'])
-    ->name('xtream.stream.vod.root');
-Route::get('/series/{username}/{password}/{streamId}.{format?}', [App\Http\Controllers\XtreamStreamController::class, 'handleSeries'])
-    ->name('xtream.stream.series.root');
+    /*
+     * Playlist/EPG output routes
+     */
 
-// Timeshift endpoints
-Route::get('/timeshift/{username}/{password}/{duration}/{date}/{streamId}.{format?}', [App\Http\Controllers\XtreamStreamController::class, 'handleTimeshift'])
-    ->name('xtream.stream.timeshift.root');
+    // Generate M3U playlist from the playlist configuration
+    Route::get('/{uuid}/playlist.m3u', PlaylistGenerateController::class)
+        ->name('playlist.generate');
 
-// (Fallback) direct stream access (without /live/ or /movie/ prefix)
-Route::get('/{username}/{password}/{streamId}.{format?}', [App\Http\Controllers\XtreamStreamController::class, 'handleDirect'])
-    ->name('xtream.stream.direct');
+    // Auth-aware HDHR routes (path-based auth to support clients that ignore query string auth)
+    Route::get('/{uuid}/hdhr/{username}/{password}/device.xml', [\App\Http\Controllers\PlaylistGenerateController::class, 'hdhr'])
+        ->name('playlist.hdhr.auth_device');
+    Route::get('/{uuid}/hdhr/{username}/{password}', [\App\Http\Controllers\PlaylistGenerateController::class, 'hdhrOverview'])
+        ->name('playlist.hdhr.overview.auth');
+    Route::get('/{uuid}/hdhr/{username}/{password}/discover.json', [\App\Http\Controllers\PlaylistGenerateController::class, 'hdhrDiscover'])
+        ->name('playlist.hdhr.discover.auth');
+    Route::get('/{uuid}/hdhr/{username}/{password}/lineup.json', [\App\Http\Controllers\PlaylistGenerateController::class, 'hdhrLineup'])
+        ->name('playlist.hdhr.lineup.auth');
+    Route::get('/{uuid}/hdhr/{username}/{password}/lineup_status.json', [\App\Http\Controllers\PlaylistGenerateController::class, 'hdhrLineupStatus'])
+        ->name('playlist.hdhr.lineup_status.auth');
 
-// Add this route for the image proxy
-Route::get('/schedules-direct/{epg}/image/{imageHash}', [
-    \App\Http\Controllers\SchedulesDirectImageProxyController::class,
-    'proxyImage',
-])->name('schedules-direct.image.proxy');
+    // Legacy/non-auth HDHR routes (keep for backwards compatibility and query-var auth)
+    Route::get('/{uuid}/hdhr/device.xml', [\App\Http\Controllers\PlaylistGenerateController::class, 'hdhr'])
+        ->name('playlist.hdhr');
+    Route::get('/{uuid}/hdhr', [\App\Http\Controllers\PlaylistGenerateController::class, 'hdhrOverview'])
+        ->name('playlist.hdhr.overview');
+    Route::get('/{uuid}/hdhr/discover.json', [\App\Http\Controllers\PlaylistGenerateController::class, 'hdhrDiscover'])
+        ->name('playlist.hdhr.discover');
+    Route::get('/{uuid}/hdhr/lineup.json', [\App\Http\Controllers\PlaylistGenerateController::class, 'hdhrLineup'])
+        ->name('playlist.hdhr.lineup');
+    Route::get('/{uuid}/hdhr/lineup_status.json', [\App\Http\Controllers\PlaylistGenerateController::class, 'hdhrLineupStatus'])
+        ->name('playlist.hdhr.lineup_status');
 
-/*
- * Media Server (Emby/Jellyfin) proxy routes
- * These hide the API key from external clients
- */
-Route::get('/media-server/{integrationId}/image/{itemId}/{imageType?}', [
-    \App\Http\Controllers\MediaServerProxyController::class,
-    'proxyImage',
-])->name('media-server.image.proxy');
+    // Generate EPG playlist from the playlist configuration
+    Route::get('/{uuid}/epg.xml', EpgGenerateController::class)
+        ->name('epg.generate');
+    Route::get('/{uuid}/epg.xml.gz', [EpgGenerateController::class, 'compressed'])
+        ->name('epg.generate.compressed');
 
-Route::get('/media-server/{integrationId}/stream/{itemId}.{container}', [
-    \App\Http\Controllers\MediaServerProxyController::class,
-    'proxyStream',
-])->name('media-server.stream.proxy');
+    // Serve the EPG file
+    Route::get('epgs/{uuid}/epg.xml', EpgFileController::class)
+        ->name('epg.file');
 
-/*
- * Local Media streaming routes
- * Streams local video files mounted to the container
- */
-Route::get('/local-media/{integration}/stream/{item}', [
-    \App\Http\Controllers\MediaServerProxyController::class,
-    'streamLocalMedia',
-])->name('local-media.stream');
+    // Network EPG routes
+    Route::get('/network/{network}/epg.xml', [NetworkEpgController::class, 'show'])
+        ->name('network.epg');
+    Route::get('/network/{network}/epg.xml.gz', [NetworkEpgController::class, 'compressed'])
+        ->name('network.epg.compressed');
 
-/*
- * WebDAV Media streaming routes
- * Proxies video files from a WebDAV server
- */
-Route::get('/webdav-media/{integration}/stream/{item}', [
-    \App\Http\Controllers\MediaServerProxyController::class,
-    'streamWebDavMedia',
-])->name('webdav-media.stream');
+    // Network stream routes
+    Route::get('/network/{network}/stream.{container}', [NetworkStreamController::class, 'stream'])
+        ->name('network.stream')
+        ->where('container', 'ts|mp4|mkv|avi|webm|mov');
+    Route::get('/network/{network}/now-playing', [NetworkStreamController::class, 'nowPlaying'])
+        ->name('network.now-playing');
+    Route::get('/network/{network}/playlist.m3u', [NetworkPlaylistController::class, 'single'])
+        ->name('network.playlist');
+
+    // Networks (plural) playlist routes - all user's networks
+    Route::get('/networks/{user}/playlist.m3u', NetworkPlaylistController::class)
+        ->name('networks.playlist');
+    Route::get('/networks/{user}/epg.xml', [NetworkPlaylistController::class, 'epg'])
+        ->name('networks.epg');
+
+    // Media Integration Networks playlist - networks for a specific media server integration
+    Route::get('/media-integration/{integration}/networks/playlist.m3u', [NetworkPlaylistController::class, 'forIntegration'])
+        ->name('media-integration.networks.playlist');
+    Route::get('/media-integration/{integration}/networks/epg.xml', [NetworkPlaylistController::class, 'epgForIntegration'])
+        ->name('media-integration.networks.epg');
+
+    // Network HLS broadcast routes (for continuous live broadcasting)
+    Route::get('/network/{network}/live.m3u8', [\App\Http\Controllers\NetworkHlsController::class, 'playlist'])
+        ->name('network.hls.playlist');
+    Route::get('/network/{network}/{segment}.ts', [\App\Http\Controllers\NetworkHlsController::class, 'segment'])
+        ->name('network.hls.segment')
+        ->where('segment', 'live[0-9]+');
+
+    /*
+     * Proxy routes (redirects to m3u-proxy API)
+     */
+
+    // Deprecated route for episode - redirect to m3u-proxy API
+    Route::get('/shared/stream/e/{encodedId}.{format?}', function (string $encodedId) {
+        $id = base64_decode($encodedId);
+
+        return redirect()->route('m3u-proxy.episode', ['id' => $id]);
+    })->name('shared.stream.episode');
+
+    // Deprecated route for channel - redirect to m3u-proxy API
+    Route::get('/shared/stream/{encodedId}.{format?}', function (string $encodedId) {
+        $id = base64_decode($encodedId);
+
+        return redirect()->route('m3u-proxy.channel', ['id' => $id]);
+    })->name('shared.stream.channel');
+
+    /*
+     * Xtream API endpoints at root
+     */
+
+    // Main Xtream API endpoint at /player_api.php and /get.php
+    Route::match(['get', 'post'], '/player_api.php', [XtreamApiController::class, 'handle'])->name('xtream.api.player');
+    Route::match(['get', 'post'], '/get.php', [XtreamApiController::class, 'handle'])->name('xtream.api.get');
+    Route::get('/xmltv.php', [XtreamApiController::class, 'epg'])->name('xtream.api.epg');
+
+    // Stream endpoints
+    Route::get('/live/{username}/{password}/{streamId}.{format?}', [App\Http\Controllers\XtreamStreamController::class, 'handleLive'])
+        ->name('xtream.stream.live.root');
+    Route::get('/movie/{username}/{password}/{streamId}.{format?}', [App\Http\Controllers\XtreamStreamController::class, 'handleVod'])
+        ->name('xtream.stream.vod.root');
+    Route::get('/series/{username}/{password}/{streamId}.{format?}', [App\Http\Controllers\XtreamStreamController::class, 'handleSeries'])
+        ->name('xtream.stream.series.root');
+
+    // Timeshift endpoints
+    Route::get('/timeshift/{username}/{password}/{duration}/{date}/{streamId}.{format?}', [App\Http\Controllers\XtreamStreamController::class, 'handleTimeshift'])
+        ->name('xtream.stream.timeshift.root');
+
+    // (Fallback) direct stream access (without /live/ or /movie/ prefix)
+    Route::get('/{username}/{password}/{streamId}.{format?}', [App\Http\Controllers\XtreamStreamController::class, 'handleDirect'])
+        ->name('xtream.stream.direct');
+
+    // Schedules Direct image proxy
+    Route::get('/schedules-direct/{epg}/image/{imageHash}', [
+        \App\Http\Controllers\SchedulesDirectImageProxyController::class,
+        'proxyImage',
+    ])->name('schedules-direct.image.proxy');
+
+    /*
+     * Media Server (Emby/Jellyfin) proxy routes
+     * These hide the API key from external clients
+     */
+    Route::get('/media-server/{integrationId}/image/{itemId}/{imageType?}', [
+        \App\Http\Controllers\MediaServerProxyController::class,
+        'proxyImage',
+    ])->name('media-server.image.proxy');
+
+    Route::get('/media-server/{integrationId}/stream/{itemId}.{container}', [
+        \App\Http\Controllers\MediaServerProxyController::class,
+        'proxyStream',
+    ])->name('media-server.stream.proxy');
+
+    /*
+     * Local Media streaming routes
+     * Streams local video files mounted to the container
+     */
+    Route::get('/local-media/{integration}/stream/{item}', [
+        \App\Http\Controllers\MediaServerProxyController::class,
+        'streamLocalMedia',
+    ])->name('local-media.stream');
+
+    /*
+     * WebDAV Media streaming routes
+     * Proxies video files from a WebDAV server
+     */
+    Route::get('/webdav-media/{integration}/stream/{item}', [
+        \App\Http\Controllers\MediaServerProxyController::class,
+        'streamWebDavMedia',
+    ])->name('webdav-media.stream');
+});

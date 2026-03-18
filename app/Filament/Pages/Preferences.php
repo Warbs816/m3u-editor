@@ -236,6 +236,12 @@ class Preferences extends SettingsPage
                                                     ->rows(3)
                                                     ->columnSpanFull()
                                                     ->default(''),
+                                                Toggle::make('xtream_restrict_to_dedicated_port')
+                                                    ->label('Restrict to dedicated Xtream port')
+                                                    ->helperText('Only allow Xtream API, streams, EPG, logos, and playlists on the dedicated Xtream port. The main application port will only serve the dashboard.')
+                                                    ->visible(fn () => config('xtream.enabled'))
+                                                    ->columnSpanFull()
+                                                    ->default(false),
 
                                             ]),
                                     ]),
