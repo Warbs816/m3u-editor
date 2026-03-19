@@ -202,7 +202,7 @@ class Preferences extends SettingsPage
                                             ->label('Allowed domains')
                                             ->columnSpanFull()
                                             ->placeholder(fn () => config('dev.allowed_playlist_domains') ? null : '*.example.com*')
-                                            ->helperText('List of allowed domains (supports wildcards, e.g. *.example.com*). Press return to add each domain. When set, playlist URLs must match one of these patterns.')
+                                            ->helperText('List of allowed domains (supports wildcards, e.g. *.example.com*). Press [tab] or [return] to add item. When set, playlist URLs must match one of these patterns.')
                                             ->disabled(fn () => ! empty(config('dev.allowed_playlist_domains')))
                                             ->hint(fn () => ! empty(config('dev.allowed_playlist_domains')) ? 'Already set by environment variable!' : null)
                                             ->default(fn () => ! empty(config('dev.allowed_playlist_domains'))
