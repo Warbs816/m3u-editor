@@ -295,6 +295,7 @@ db_file_jobs="${db_dir}/jobs.sqlite"
 epg_dir="${config_dir}/epg"
 epg_cache_dir="${config_dir}/epg-cache"
 logo_cache_dir="${config_dir}/cached-logos"
+asset_uploads_dir="${config_dir}/asset-uploads"
 playlist_dir="${config_dir}/playlist"
 playlist_epg_dir="${config_dir}/playlist-epg-files"
 backup_dir="${config_dir}/m3u-editor-backups"
@@ -333,6 +334,7 @@ fi
 [ ! -d "${epg_dir}" ] && mkdir -p "${epg_dir}"
 [ ! -d "${epg_cache_dir}" ] && mkdir -p "${epg_cache_dir}"
 [ ! -d "${logo_cache_dir}" ] && mkdir -p "${logo_cache_dir}"
+[ ! -d "${asset_uploads_dir}" ] && mkdir -p "${asset_uploads_dir}"
 [ ! -d "${playlist_dir}" ] && mkdir -p "${playlist_dir}"
 [ ! -d "${playlist_epg_dir}" ] && mkdir -p "${playlist_epg_dir}"
 [ ! -d "${backup_dir}" ] && mkdir -p "${backup_dir}"
@@ -389,6 +391,8 @@ ln -sf "${log_dir}" storage/
 [ ! -d "storage/app/private/epg" ] && ln -sf "${epg_dir}" storage/app/private/epg
 [ ! -d "storage/app/private/epg-cache" ] && ln -sf "${epg_cache_dir}" storage/app/private/epg-cache
 [ ! -d "storage/app/private/cached-logos" ] && ln -sf "${logo_cache_dir}" storage/app/private/cached-logos
+[ ! -d "storage/app/public/assets" ] && mkdir -p storage/app/public/assets
+[ ! -d "storage/app/public/assets/library" ] && ln -sf "${asset_uploads_dir}" storage/app/public/assets/library
 [ ! -d "storage/app/private/playlist" ] && ln -sf "${playlist_dir}" storage/app/private/playlist
 [ ! -d "storage/app/private/playlist-epg-files" ] && ln -sf "${playlist_epg_dir}" storage/app/private/playlist-epg-files
 [ ! -d "storage/app/private/m3u-editor-backups" ] && ln -sf "${backup_dir}" storage/app/private/m3u-editor-backups

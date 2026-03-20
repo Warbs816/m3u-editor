@@ -17,7 +17,7 @@ class ListAssets extends ListRecords
 {
     protected static string $resource = AssetResource::class;
 
-    protected ?string $subheading = 'Manage cached logos and uploaded media assets. Placeholder images can be updated in Settings > Assets.';
+    protected ?string $subheading = 'Manage cached logos and uploaded media assets. Uploaded images on the public disk can be used as logos for channels, VOD, or series covers via the "Image Asset" option. Placeholder images can be updated in Settings > Assets.';
 
     public function mount(): void
     {

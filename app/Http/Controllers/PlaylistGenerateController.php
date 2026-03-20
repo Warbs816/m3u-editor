@@ -182,6 +182,8 @@ class PlaylistGenerateController extends Controller
                     }
                     if (empty($icon)) {
                         $icon = $baseUrl.'/placeholder.png';
+                    } elseif (str_starts_with($icon, '/')) {
+                        $icon = $baseUrl.$icon;
                     }
 
                     // Get the extension from the source URL
@@ -195,7 +197,7 @@ class PlaylistGenerateController extends Controller
                         }
                     }
 
-                    if ($logoProxyEnabled) {
+                    if ($logoProxyEnabled && $channel->logo_type !== ChannelLogoType::Asset) {
                         // Proxy the logo through the logo proxy controller
                         $icon = LogoProxyController::generateProxyUrl($icon);
                     }

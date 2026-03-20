@@ -79,6 +79,12 @@ class AssetResource extends Resource
                     ->label('Size')
                     ->sortable()
                     ->formatStateUsing(fn (?int $state): string => $state ? number_format($state / 1024, 2).' KB' : '—'),
+                TextColumn::make('asset_url')
+                    ->label('Asset URL')
+                    ->getStateUsing(fn (Asset $record): ?string => $record->public_url)
+                    ->copyable()
+                    ->placeholder('—')
+                    ->toggleable(isToggledHiddenByDefault: true),
                 TextColumn::make('last_modified_at')
                     ->label('Modified')
                     ->dateTime()

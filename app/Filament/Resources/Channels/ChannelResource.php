@@ -11,6 +11,7 @@ use App\Filament\Resources\EpgMaps\EpgMapResource;
 use App\Jobs\ChannelFindAndReplace;
 use App\Jobs\ChannelFindAndReplaceReset;
 use App\Jobs\MapPlaylistChannelsToEpg;
+use App\Models\Asset;
 use App\Models\Channel;
 use App\Models\ChannelFailover;
 use App\Models\CustomPlaylist;
@@ -312,6 +313,7 @@ class ChannelResource extends Resource
                 ->options([
                     'channel' => 'Channel',
                     'epg' => 'EPG',
+                    'asset' => 'Image Asset',
                 ])
                 ->sortable()
                 ->tooltip('Preferred icon source')
@@ -508,19 +510,32 @@ class ChannelResource extends Resource
                     ->schema([
                         Select::make('logo_type')
                             ->label('Preferred Icon')
-                            ->helperText('Prefer logo from channel or EPG.')
+                            ->helperText('Prefer logo from channel, EPG, or an uploaded image asset.')
                             ->options([
                                 'channel' => 'Channel',
                                 'epg' => 'EPG',
+                                'asset' => 'Image Asset',
                             ])
+                            ->live()
                             ->searchable(),
-
+                        Select::make('logo')
+                            ->label('Image Asset')
+                            ->options(fn () => Asset::query()
+                                ->where('disk', 'public')
+                                ->where('is_image', true)
+                                ->get()
+                                ->mapWithKeys(fn (Asset $asset) => [$asset->public_url => $asset->name]))
+                            ->searchable()
+                            ->helperText('Select an uploaded image asset to use as the logo.')
+                            ->hidden(fn (Get $get) => $get('logo_type') !== 'asset'),
                     ])
                     ->action(function (Collection $records, array $data): void {
+                        $updates = ['logo_type' => $data['logo_type']];
+                        if ($data['logo_type'] === 'asset' && ! empty($data['logo'])) {
+                            $updates['logo'] = $data['logo'];
+                        }
                         Channel::whereIn('id', $records->pluck('id')->toArray())
-                            ->update([
-                                'logo_type' => $data['logo_type'],
-                            ]);
+                            ->update($updates);
                     })->after(function () {
                         Notification::make()
                             ->success()
@@ -1265,7 +1280,18 @@ class ChannelResource extends Resource
                         ->helperText('Leave empty to use provider logo.')
                         ->rules(['min:1'])
                         ->type('url')
-                        ->hidden(fn (Get $get) => $get('is_custom')),
+                        ->hidden(fn (Get $get) => $get('is_custom') || $get('logo_type') === 'asset'),
+                    Select::make('logo')
+                        ->label('Image Asset')
+                        ->columnSpan(1)
+                        ->options(fn () => Asset::query()
+                            ->where('disk', 'public')
+                            ->where('is_image', true)
+                            ->get()
+                            ->mapWithKeys(fn (Asset $asset) => [$asset->public_url => $asset->name]))
+                        ->searchable()
+                        ->helperText('Select an uploaded image asset to use as the logo.')
+                        ->hidden(fn (Get $get) => $get('logo_type') !== 'asset'),
                     TextInput::make('url_proxy')
                         ->label('Proxy URL')
                         ->columnSpan(2)
@@ -1327,11 +1353,13 @@ class ChannelResource extends Resource
                         ->columnSpan(1),
                     Select::make('logo_type')
                         ->label('Preferred Icon')
-                        ->helperText('Prefer icon from channel or EPG.')
+                        ->helperText('Prefer icon from channel, EPG, or an uploaded image asset.')
                         ->options([
                             'channel' => 'Channel',
                             'epg' => 'EPG',
+                            'asset' => 'Image Asset',
                         ])
+                        ->live()
                         ->columnSpan(1),
                     TextInput::make('tvg_shift')
                         ->label('EPG Shift')

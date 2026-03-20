@@ -179,8 +179,10 @@ class EpgGenerateController extends Controller
                 }
                 if (empty($icon)) {
                     $icon = url('/placeholder.png');
+                } elseif (str_starts_with($icon, '/')) {
+                    $icon = url($icon);
                 }
-                if ($logoProxyEnabled) {
+                if ($logoProxyEnabled && $channel->logo_type !== ChannelLogoType::Asset) {
                     $icon = LogoProxyController::generateProxyUrl($icon);
                 }
 
@@ -199,9 +201,11 @@ class EpgGenerateController extends Controller
                 $icon = $channel->logo ?? $channel->logo_internal ?? '';
                 if (empty($icon)) {
                     $icon = url('/placeholder.png');
+                } elseif (str_starts_with($icon, '/')) {
+                    $icon = url($icon);
                 }
                 $icon = htmlspecialchars($icon);
-                if ($logoProxyEnabled) {
+                if ($logoProxyEnabled && $channel->logo_type !== ChannelLogoType::Asset) {
                     $icon = LogoProxyController::generateProxyUrl($icon);
                 }
 

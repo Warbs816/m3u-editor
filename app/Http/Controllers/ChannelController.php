@@ -507,7 +507,7 @@ class ChannelController extends Controller
             ],
             'channel_number' => 'sometimes|nullable|integer|min:0',
             'sort_order' => 'sometimes|nullable|numeric|min:0',
-            'logo_type' => 'sometimes|string|in:channel,epg',
+            'logo_type' => 'sometimes|string|in:channel,epg,asset',
             'use_epg_logo' => 'sometimes|boolean',
             'epg_map_enabled' => 'sometimes|boolean',
             'tvg_shift' => 'sometimes|nullable|numeric',
@@ -544,6 +544,7 @@ class ChannelController extends Controller
                 'epg_channel_id' => $channel->epg_channel_id,
                 'logo_type' => $channel->logo_type?->value,
                 'use_epg_logo' => $channel->logo_type === ChannelLogoType::Epg,
+                'use_asset_logo' => $channel->logo_type === ChannelLogoType::Asset,
                 'epg_map_enabled' => $channel->epg_map_enabled ?? true,
                 'tvg_shift' => $channel->tvg_shift,
             ],
@@ -712,6 +713,7 @@ class ChannelController extends Controller
                 'tvg_shift' => $channel->tvg_shift,
                 'logo_type' => $channel->logo_type?->value,
                 'use_epg_logo' => $channel->logo_type === ChannelLogoType::Epg,
+                'use_asset_logo' => $channel->logo_type === ChannelLogoType::Asset,
                 'epg_map_enabled' => $channel->epg_map_enabled ?? true,
                 'proxy_url' => $proxyUrl,
                 'epg' => $epgInfo,
@@ -851,7 +853,7 @@ class ChannelController extends Controller
             'updates.channel_number' => 'sometimes|nullable|integer|min:0',
             'updates.sort' => 'sometimes|nullable|numeric|min:0',
             'updates.sort_order' => 'sometimes|nullable|numeric|min:0',
-            'updates.logo_type' => 'sometimes|string|in:channel,epg',
+            'updates.logo_type' => 'sometimes|string|in:channel,epg,asset',
             'updates.use_epg_logo' => 'sometimes|boolean',
             'updates.epg_map_enabled' => 'sometimes|boolean',
             'updates.tvg_shift' => 'sometimes|nullable|numeric',
@@ -1237,6 +1239,7 @@ class ChannelController extends Controller
                 $updates['logo_type'] = $logoType;
                 $applied['logo_type'] = $logoType;
                 $applied['use_epg_logo'] = $logoType === ChannelLogoType::Epg->value;
+                $applied['use_asset_logo'] = $logoType === ChannelLogoType::Asset->value;
             }
         }
 

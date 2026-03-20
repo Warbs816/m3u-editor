@@ -35,4 +35,13 @@ class Asset extends Model
     {
         return route('assets.preview', $this);
     }
+
+    public function getPublicUrlAttribute(): ?string
+    {
+        if ($this->disk !== 'public' || ! $this->is_image) {
+            return null;
+        }
+
+        return '/storage/'.$this->path;
+    }
 }

@@ -592,7 +592,10 @@ class XtreamApiController extends Controller
                         $logo = $channel->logo ?? $channel->logo_internal ?? '';
                         $streamIcon = filter_var($logo, FILTER_VALIDATE_URL) ? $logo : $baseUrl."/$logo";
                     }
-                    if ($playlist->enable_logo_proxy) {
+                    if (str_starts_with($streamIcon, '/')) {
+                        $streamIcon = $baseUrl.$streamIcon;
+                    }
+                    if ($playlist->enable_logo_proxy && $channel->logo_type !== ChannelLogoType::Asset) {
                         $streamIcon = LogoProxyController::generateProxyUrl($streamIcon);
                     }
 
@@ -770,7 +773,10 @@ class XtreamApiController extends Controller
                         $logo = $channel->logo ?? $channel->logo_internal ?? '';
                         $streamIcon = filter_var($logo, FILTER_VALIDATE_URL) ? $logo : $baseUrl."/$logo";
                     }
-                    if ($playlist->enable_logo_proxy) {
+                    if (str_starts_with($streamIcon, '/')) {
+                        $streamIcon = $baseUrl.$streamIcon;
+                    }
+                    if ($playlist->enable_logo_proxy && $channel->logo_type !== ChannelLogoType::Asset) {
                         $streamIcon = LogoProxyController::generateProxyUrl($streamIcon);
                     }
 

@@ -14,6 +14,7 @@ use App\Jobs\FetchTmdbIds;
 use App\Jobs\ProcessM3uImportSeriesEpisodes;
 use App\Jobs\SeriesFindAndReplace;
 use App\Jobs\SyncSeriesStrmFiles;
+use App\Models\Asset;
 use App\Models\Category;
 use App\Models\Playlist;
 use App\Models\Series;
@@ -569,11 +570,30 @@ class SeriesResource extends Resource
                 BulkAction::make('set_poster_url')
                     ->label('Set poster URL')
                     ->schema([
+                        Select::make('cover_source')
+                            ->label('Cover Source')
+                            ->options([
+                                'url' => 'URL',
+                                'asset' => 'Image Asset',
+                            ])
+                            ->default('url')
+                            ->live(),
                         TextInput::make('cover')
                             ->label('Series poster URL')
                             ->url()
                             ->nullable()
-                            ->helperText('Leave empty to remove custom poster URL and use placeholder fallback.'),
+                            ->helperText('Leave empty to remove custom poster URL and use placeholder fallback.')
+                            ->hidden(fn (Get $get) => $get('cover_source') === 'asset'),
+                        Select::make('cover')
+                            ->label('Image Asset')
+                            ->options(fn () => Asset::query()
+                                ->where('disk', 'public')
+                                ->where('is_image', true)
+                                ->get()
+                                ->mapWithKeys(fn (Asset $asset) => [$asset->public_url => $asset->name]))
+                            ->searchable()
+                            ->helperText('Select an uploaded image asset to use as the series cover.')
+                            ->hidden(fn (Get $get) => $get('cover_source') !== 'asset'),
                     ])
                     ->action(function (Collection $records, array $data): void {
                         Series::whereIn('id', $records->pluck('id')->toArray())
@@ -591,8 +611,8 @@ class SeriesResource extends Resource
                     ->requiresConfirmation()
                     ->icon('heroicon-o-link')
                     ->modalIcon('heroicon-o-link')
-                    ->modalDescription('Apply a single poster URL to all selected series. Leave empty to remove custom posters.')
-                    ->modalSubmitActionLabel('Apply URL'),
+                    ->modalDescription('Apply a single poster URL or image asset to all selected series. Leave empty to remove custom posters.')
+                    ->modalSubmitActionLabel('Apply now'),
                 BulkAction::make('refresh_logo_cache')
                     ->label('Refresh poster cache (selected)')
                     ->action(function (Collection $records): void {
@@ -878,8 +898,36 @@ class SeriesResource extends Resource
                                         ->required(),
                                     Select::make('category_id')
                                         ->relationship('category', 'name'),
+                                    Select::make('cover_source')
+                                        ->label('Cover Source')
+                                        ->options([
+                                            'url' => 'URL',
+                                            'asset' => 'Image Asset',
+                                        ])
+                                        ->default('url')
+                                        ->dehydrated(false)
+                                        ->live()
+                                        ->afterStateHydrated(function (Set $set, Get $get) {
+                                            $cover = $get('cover');
+                                            if ($cover && str_contains($cover, '/storage/assets/')) {
+                                                $set('cover_source', 'asset');
+                                            } else {
+                                                $set('cover_source', 'url');
+                                            }
+                                        }),
                                     TextInput::make('cover')
-                                        ->maxLength(255),
+                                        ->maxLength(255)
+                                        ->hidden(fn (Get $get) => $get('cover_source') === 'asset'),
+                                    Select::make('cover')
+                                        ->label('Image Asset')
+                                        ->options(fn () => Asset::query()
+                                            ->where('disk', 'public')
+                                            ->where('is_image', true)
+                                            ->get()
+                                            ->mapWithKeys(fn (Asset $asset) => [$asset->public_url => $asset->name]))
+                                        ->searchable()
+                                        ->helperText('Select an uploaded image asset to use as the series cover.')
+                                        ->hidden(fn (Get $get) => $get('cover_source') !== 'asset'),
                                     Textarea::make('plot')
                                         ->columnSpanFull(),
                                     TextInput::make('genre')
