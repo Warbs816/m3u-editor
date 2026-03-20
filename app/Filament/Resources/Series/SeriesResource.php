@@ -35,7 +35,6 @@ use Filament\Actions\DeleteAction;
 use Filament\Actions\DeleteBulkAction;
 use Filament\Actions\EditAction;
 use Filament\Actions\ViewAction;
-use Filament\Forms;
 use Filament\Forms\Components\CheckboxList;
 use Filament\Forms\Components\DatePicker;
 use Filament\Forms\Components\Hidden;
@@ -409,7 +408,7 @@ class SeriesResource extends Resource
                         Section::make('Search Results')
                             ->description('Click on a result to apply the TMDB IDs')
                             ->schema([
-                                Forms\Components\Hidden::make('series_id'),
+                                Hidden::make('series_id'),
                                 TmdbSearchResults::make('search_results')
                                     ->type('tv')
                                     ->default([]),
