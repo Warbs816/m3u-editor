@@ -758,7 +758,7 @@ class VodResource extends Resource
                             ])
                             ->live()
                             ->searchable(),
-                        Select::make('logo')
+                        Select::make('_asset_logo')
                             ->label('Image Asset')
                             ->options(fn () => Asset::query()
                                 ->where('disk', 'public')
@@ -771,8 +771,8 @@ class VodResource extends Resource
                     ])
                     ->action(function (Collection $records, array $data): void {
                         $updates = ['logo_type' => $data['logo_type']];
-                        if ($data['logo_type'] === 'asset' && ! empty($data['logo'])) {
-                            $updates['logo'] = $data['logo'];
+                        if ($data['logo_type'] === 'asset' && ! empty($data['_asset_logo'])) {
+                            $updates['logo'] = $data['_asset_logo'];
                         }
                         Channel::whereIn('id', $records->pluck('id')->toArray())
                             ->update($updates);
@@ -1509,7 +1509,7 @@ class VodResource extends Resource
                         ->disabled(fn (Get $get) => ! $get('is_custom')) // make it read-only but copyable for non-custom channels
                         ->dehydrated(fn (Get $get) => $get('is_custom')) // don't save the value in the database for custom channels
                         ->type('url'),
-                    TextInput::make('logo')
+                    TextInput::make('_logo_url')
                         ->label('Logo Override')
                         ->columnSpan(1)
                         ->prefixIcon('heroicon-m-globe-alt')
@@ -1521,18 +1521,13 @@ class VodResource extends Resource
                         ->helperText('Leave empty to use provider logo.')
                         ->rules(['min:1'])
                         ->type('url')
-                        ->hidden(fn (Get $get) => $get('is_custom') || $get('logo_type') === 'asset'),
-                    Select::make('logo')
-                        ->label('Image Asset')
-                        ->columnSpan(1)
-                        ->options(fn () => Asset::query()
-                            ->where('disk', 'public')
-                            ->where('is_image', true)
-                            ->get()
-                            ->mapWithKeys(fn (Asset $asset) => [$asset->public_url => $asset->name]))
-                        ->searchable()
-                        ->helperText('Select an uploaded image asset to use as the logo.')
-                        ->hidden(fn (Get $get) => $get('logo_type') !== 'asset'),
+                        ->dehydrated(false)
+                        ->hidden(fn (Get $get) => $get('is_custom') || $get('logo_type') === 'asset')
+                        ->afterStateHydrated(function (Set $set, Get $get) {
+                            if ($get('logo_type') !== 'asset') {
+                                $set('_logo_url', $get('logo'));
+                            }
+                        }),
                     TextInput::make('url_proxy')
                         ->label('Proxy URL')
                         ->columnSpan(2)
@@ -1601,6 +1596,39 @@ class VodResource extends Resource
                         ])
                         ->live()
                         ->columnSpan(1),
+                    Hidden::make('logo')
+                        ->dehydrateStateUsing(function (?string $state, Get $get) {
+                            if ($get('is_custom')) {
+                                return $state;
+                            }
+                            if ($get('logo_type') === 'asset') {
+                                return $get('_asset_logo');
+                            }
+
+                            return $get('_logo_url');
+                        }),
+                    Select::make('_asset_logo')
+                        ->label('Image Asset')
+                        ->columnSpan(1)
+                        ->hint('tvg-logo')
+                        ->hintIcon(
+                            'heroicon-m-question-mark-circle',
+                            tooltip: 'Select an uploaded image asset to use as the channel logo instead of a URL.'
+                        )
+                        ->dehydrated(false)
+                        ->options(fn () => Asset::query()
+                            ->where('disk', 'public')
+                            ->where('is_image', true)
+                            ->get()
+                            ->mapWithKeys(fn (Asset $asset) => [$asset->public_url => $asset->name]))
+                        ->searchable()
+                        ->helperText('Select an uploaded image asset to use as the logo.')
+                        ->hidden(fn (Get $get) => $get('logo_type') !== 'asset')
+                        ->afterStateHydrated(function (Set $set, Get $get) {
+                            if ($get('logo_type') === 'asset') {
+                                $set('_asset_logo', $get('logo'));
+                            }
+                        }),
                     TextInput::make('tvg_shift')
                         ->label('EPG Shift')
                         ->hint('tvg-shift')

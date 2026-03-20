@@ -52,9 +52,9 @@ class LogoService
             }
         }
 
-        // Asset logos originate from this app — never proxy
+        // Asset logos originate from this app — never proxy, resolve relative paths
         if ($channel->logo_type === ChannelLogoType::Asset) {
-            return $logoUrl;
+            return str_starts_with($logoUrl, '/') ? url($logoUrl) : $logoUrl;
         }
 
         // If it's already a local URL, return as-is
@@ -84,7 +84,7 @@ class LogoService
 
         // Asset URLs served from public storage originate from this app — never proxy
         if (str_contains($logoUrl, '/storage/assets/')) {
-            return $logoUrl;
+            return str_starts_with($logoUrl, '/') ? url($logoUrl) : $logoUrl;
         }
 
         // If it's already a local URL, return as-is

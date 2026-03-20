@@ -38,6 +38,7 @@ use Filament\Actions\ViewAction;
 use Filament\Forms;
 use Filament\Forms\Components\CheckboxList;
 use Filament\Forms\Components\DatePicker;
+use Filament\Forms\Components\Hidden;
 use Filament\Forms\Components\Select;
 use Filament\Forms\Components\Textarea;
 use Filament\Forms\Components\TextInput;
@@ -584,7 +585,7 @@ class SeriesResource extends Resource
                             ->nullable()
                             ->helperText('Leave empty to remove custom poster URL and use placeholder fallback.')
                             ->hidden(fn (Get $get) => $get('cover_source') === 'asset'),
-                        Select::make('cover')
+                        Select::make('_asset_cover')
                             ->label('Image Asset')
                             ->options(fn () => Asset::query()
                                 ->where('disk', 'public')
@@ -596,9 +597,12 @@ class SeriesResource extends Resource
                             ->hidden(fn (Get $get) => $get('cover_source') !== 'asset'),
                     ])
                     ->action(function (Collection $records, array $data): void {
+                        $cover = ($data['cover_source'] === 'asset')
+                            ? ($data['_asset_cover'] ?? null)
+                            : (empty($data['cover']) ? null : $data['cover']);
                         Series::whereIn('id', $records->pluck('id')->toArray())
                             ->update([
-                                'cover' => empty($data['cover']) ? null : $data['cover'],
+                                'cover' => $cover,
                             ]);
                     })->after(function () {
                         Notification::make()
@@ -898,6 +902,22 @@ class SeriesResource extends Resource
                                         ->required(),
                                     Select::make('category_id')
                                         ->relationship('category', 'name'),
+                                    Hidden::make('_cover_before_asset')
+                                        ->dehydrated(false)
+                                        ->afterStateHydrated(function (Set $set, Get $get) {
+                                            $cover = $get('cover');
+                                            if (! $cover || ! str_contains($cover, '/storage/assets/')) {
+                                                $set('_cover_before_asset', $cover);
+                                            }
+                                        }),
+                                    Hidden::make('cover')
+                                        ->dehydrateStateUsing(function (?string $state, Get $get) {
+                                            if ($get('cover_source') === 'asset') {
+                                                return $get('_asset_cover');
+                                            }
+
+                                            return $get('_cover_url');
+                                        }),
                                     Select::make('cover_source')
                                         ->label('Cover Source')
                                         ->options([
@@ -914,12 +934,28 @@ class SeriesResource extends Resource
                                             } else {
                                                 $set('cover_source', 'url');
                                             }
+                                        })
+                                        ->afterStateUpdated(function (Set $set, Get $get, ?string $state) {
+                                            if ($state === 'asset') {
+                                                $set('_cover_before_asset', $get('_cover_url'));
+                                            } else {
+                                                $set('_cover_url', $get('_cover_before_asset'));
+                                            }
                                         }),
-                                    TextInput::make('cover')
+                                    TextInput::make('_cover_url')
+                                        ->label('Cover')
                                         ->maxLength(255)
-                                        ->hidden(fn (Get $get) => $get('cover_source') === 'asset'),
-                                    Select::make('cover')
+                                        ->dehydrated(false)
+                                        ->hidden(fn (Get $get) => $get('cover_source') === 'asset')
+                                        ->afterStateHydrated(function (Set $set, Get $get) {
+                                            $cover = $get('cover');
+                                            if (! $cover || ! str_contains($cover, '/storage/assets/')) {
+                                                $set('_cover_url', $cover);
+                                            }
+                                        }),
+                                    Select::make('_asset_cover')
                                         ->label('Image Asset')
+                                        ->dehydrated(false)
                                         ->options(fn () => Asset::query()
                                             ->where('disk', 'public')
                                             ->where('is_image', true)
@@ -927,7 +963,12 @@ class SeriesResource extends Resource
                                             ->mapWithKeys(fn (Asset $asset) => [$asset->public_url => $asset->name]))
                                         ->searchable()
                                         ->helperText('Select an uploaded image asset to use as the series cover.')
-                                        ->hidden(fn (Get $get) => $get('cover_source') !== 'asset'),
+                                        ->hidden(fn (Get $get) => $get('cover_source') !== 'asset')
+                                        ->afterStateHydrated(function (Set $set, Get $get) {
+                                            if ($get('cover_source') === 'asset' || str_contains($get('cover') ?? '', '/storage/assets/')) {
+                                                $set('_asset_cover', $get('cover'));
+                                            }
+                                        }),
                                     Textarea::make('plot')
                                         ->columnSpanFull(),
                                     TextInput::make('genre')
