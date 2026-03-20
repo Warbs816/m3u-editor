@@ -351,10 +351,11 @@ class EpgApiController extends Controller
                 if ($channel->logo) {
                     // Logo override takes precedence
                     $icon = $channel->logo;
-                } elseif ($channel->logo_type === ChannelLogoType::Epg) {
-                    $icon = $epgData->icon ?? '';
-                } elseif ($channel->logo_type === ChannelLogoType::Channel) {
+                } elseif ($channel->logo_type === ChannelLogoType::Epg && ($channel->epg_icon || $channel->epg_icon_custom)) {
+                    $icon = $channel->epg_icon_custom ?? $channel->epg_icon ?? '';
+                } elseif ($channel->logo_type === ChannelLogoType::Channel && ($channel->logo || $channel->logo_internal)) {
                     $icon = $channel->logo ?? $channel->logo_internal ?? '';
+                    $icon = filter_var($icon, FILTER_VALIDATE_URL) ? $icon : url('/placeholder.png');
                 }
                 if (empty($icon)) {
                     $icon = url('/placeholder.png');

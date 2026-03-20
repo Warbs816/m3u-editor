@@ -5,6 +5,7 @@ namespace App\Filament\Resources\Channels;
 use App\Facades\LogoFacade;
 use App\Facades\ProxyFacade;
 use App\Facades\SortFacade;
+use App\Filament\Actions\AssetPickerAction;
 use App\Filament\Resources\ChannelResource\Pages;
 use App\Filament\Resources\Channels\Pages\ListChannels;
 use App\Filament\Resources\EpgMaps\EpgMapResource;
@@ -541,7 +542,11 @@ class ChannelResource extends Resource
                             ->label('Logo override URL')
                             ->url()
                             ->nullable()
-                            ->helperText('Leave empty to remove the custom logo and use provider/EPG logo.'),
+                            ->helperText('Leave empty to remove the custom logo and use provider/EPG logo.')
+                            ->suffixActions([
+                                AssetPickerAction::upload('logo'),
+                                AssetPickerAction::browse('logo'),
+                            ]),
                     ])
                     ->action(function (Collection $records, array $data): void {
                         Channel::whereIn('id', $records->pluck('id')->toArray())
@@ -1252,7 +1257,13 @@ class ChannelResource extends Resource
                         ->formatStateUsing(fn ($record) => $record?->logo_internal)
                         ->disabled(fn (Get $get) => ! $get('is_custom')) // make it read-only but copyable for non-custom channels
                         ->dehydrated(fn (Get $get) => $get('is_custom')) // don't save the value in the database for custom channels
-                        ->type('url'),
+                        ->type('url')
+                        ->suffixActions([
+                            AssetPickerAction::upload('logo_internal')
+                                ->visible(fn (Get $get): bool => $get('is_custom')),
+                            AssetPickerAction::browse('logo_internal')
+                                ->visible(fn (Get $get): bool => $get('is_custom')),
+                        ]),
                     TextInput::make('logo')
                         ->label('Logo Override')
                         ->columnSpan(1)
@@ -1265,7 +1276,11 @@ class ChannelResource extends Resource
                         ->helperText('Leave empty to use provider logo.')
                         ->rules(['min:1'])
                         ->type('url')
-                        ->hidden(fn (Get $get) => $get('is_custom')),
+                        ->hidden(fn (Get $get) => $get('is_custom'))
+                        ->suffixActions([
+                            AssetPickerAction::upload('logo'),
+                            AssetPickerAction::browse('logo'),
+                        ]),
                     TextInput::make('url_proxy')
                         ->label('Proxy URL')
                         ->columnSpan(2)
