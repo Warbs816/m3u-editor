@@ -5,6 +5,7 @@ namespace App\Filament\Resources\PostProcesses\RelationManagers;
 use Filament\Actions\BulkActionGroup;
 use Filament\Actions\DeleteAction;
 use Filament\Actions\DeleteBulkAction;
+use App\Services\DateFormatService;
 use Filament\Resources\RelationManagers\RelationManager;
 use Filament\Schemas\Schema;
 use Filament\Tables\Columns\TextColumn;
@@ -54,7 +55,7 @@ class LogsRelationManager extends RelationManager
                     ->wrap(),
                 TextColumn::make('created_at')
                     ->label('Ran at')
-                    ->dateTime()
+                    ->formatStateUsing(fn ($state) => app(DateFormatService::class)->format($state))
                     ->sortable()
                     ->toggleable(),
             ])
