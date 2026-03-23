@@ -2404,6 +2404,16 @@ class PlaylistResource extends Resource
                         ->type('number')
                         ->hidden(fn (Get $get): bool => ! $get('auto_channel_increment'))
                         ->required(),
+                    Toggle::make('disable_catchup')
+                        ->label('Disable catch-up')
+                        ->columnSpan(1)
+                        ->inline(false)
+                        ->default(false)
+                        ->hintIcon(
+                            'heroicon-m-question-mark-circle',
+                            tooltip: 'When enabled, catch-up attributes (catchup, catchup-source, timeshift) will be stripped from the M3U output.'
+                        )
+                        ->helperText('Strip all catch-up related attributes from the playlist output. Useful when your provider\'s catch-up doesn\'t work.'),
                 ]),
             Section::make('Streaming Output')
                 ->description('Output processing options')
