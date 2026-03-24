@@ -6,6 +6,7 @@ use App\Enums\Status;
 use App\Events\SyncCompleted;
 use App\Jobs\GenerateEpgCache;
 use App\Jobs\MergeChannels;
+use App\Jobs\ProcessChannelScrubber;
 use App\Jobs\RunPlaylistFindReplaceRules;
 use App\Jobs\RunPlaylistSortAlpha;
 use App\Jobs\RunPostProcess;
@@ -51,6 +52,13 @@ class SyncListener
                     $lastSync
                 ));
             });
+
+            // Dispatch recurring channel scrubbers after playlist sync
+            if ($playlist->status === Status::Completed) {
+                $playlist->channelScrubbers()->where('recurring', true)->get()->each(function ($scrubber) {
+                    dispatch(new ProcessChannelScrubber($scrubber->id));
+                });
+            }
         }
         if ($event->model instanceof Epg) {
             $event->model->postProcesses()->where([

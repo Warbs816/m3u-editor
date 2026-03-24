@@ -244,6 +244,11 @@ class Playlist extends Model
         return $this->hasMany(EpgMap::class);
     }
 
+    public function channelScrubbers(): HasMany
+    {
+        return $this->hasMany(ChannelScrubber::class);
+    }
+
     public function playlistAuths(): MorphToMany
     {
         return $this->morphToMany(PlaylistAuth::class, 'authenticatable');
