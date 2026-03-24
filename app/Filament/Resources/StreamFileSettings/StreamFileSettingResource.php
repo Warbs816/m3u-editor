@@ -97,6 +97,17 @@ class StreamFileSettingResource extends Resource
                     ->columnSpanFull()
                     ->live(),
 
+                Select::make('url_type')
+                    ->label('URL Type')
+                    ->options([
+                        'proxy' => 'Proxy URL (m3u-editor)',
+                        'original' => 'Original Source URL',
+                    ])
+                    ->default('proxy')
+                    ->columnSpanFull()
+                    ->visible(fn (Get $get): bool => (bool) $get('enabled'))
+                    ->helperText('Proxy URL routes through m3u-editor. Original uses the direct source URL from your provider.'),
+
                 TextInput::make('location')
                     ->label('Sync Location')
                     ->rules([new CheckIfUrlOrLocalPath(localOnly: true, isDirectory: true)])
