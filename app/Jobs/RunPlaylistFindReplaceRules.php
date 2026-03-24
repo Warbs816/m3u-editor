@@ -41,6 +41,8 @@ class RunPlaylistFindReplaceRules implements ShouldQueue
         $start = now();
         $channelRulesRun = 0;
         $seriesRulesRun = 0;
+        $groupRulesRun = 0;
+        $categoryRulesRun = 0;
 
         foreach ($rules as $rule) {
             $target = $rule['target'] ?? 'channels';
@@ -73,6 +75,26 @@ class RunPlaylistFindReplaceRules implements ShouldQueue
                     silent: true,
                 ))->handle();
                 $seriesRulesRun++;
+            } elseif ($target === 'groups') {
+                (new GroupFindAndReplace(
+                    user_id: $this->playlist->user_id,
+                    use_regex: $rule['use_regex'] ?? true,
+                    find_replace: $rule['find_replace'] ?? '',
+                    replace_with: $rule['replace_with'] ?? '',
+                    playlist_id: $this->playlist->id,
+                    silent: true,
+                ))->handle();
+                $groupRulesRun++;
+            } elseif ($target === 'categories') {
+                (new CategoryFindAndReplace(
+                    user_id: $this->playlist->user_id,
+                    use_regex: $rule['use_regex'] ?? true,
+                    find_replace: $rule['find_replace'] ?? '',
+                    replace_with: $rule['replace_with'] ?? '',
+                    playlist_id: $this->playlist->id,
+                    silent: true,
+                ))->handle();
+                $categoryRulesRun++;
             }
         }
 
@@ -85,6 +107,12 @@ class RunPlaylistFindReplaceRules implements ShouldQueue
         }
         if ($seriesRulesRun > 0) {
             $parts[] = "{$seriesRulesRun} series ".($seriesRulesRun === 1 ? 'rule' : 'rules');
+        }
+        if ($groupRulesRun > 0) {
+            $parts[] = "{$groupRulesRun} group ".($groupRulesRun === 1 ? 'rule' : 'rules');
+        }
+        if ($categoryRulesRun > 0) {
+            $parts[] = "{$categoryRulesRun} category ".($categoryRulesRun === 1 ? 'rule' : 'rules');
         }
         $summary = implode(' and ', $parts);
 

@@ -2313,10 +2313,16 @@ class PlaylistResource extends Resource
                                 ->options([
                                     'channels' => 'Channels (Live & VOD)',
                                     'series' => 'Series',
+                                    'groups' => 'Groups (Live & VOD)',
+                                    'categories' => 'Categories (Series)',
                                 ])
                                 ->default('channels')
                                 ->required()
                                 ->live()
+                                ->afterStateUpdated(fn (Set $set, ?string $state) => $set('column', match ($state) {
+                                    'groups', 'categories', 'series' => 'name',
+                                    default => 'title',
+                                }))
                                 ->columnSpan(2),
                             Select::make('column')
                                 ->label('Column to modify')
@@ -2326,6 +2332,12 @@ class PlaylistResource extends Resource
                                         'genre' => 'Genre',
                                         'plot' => 'Plot',
                                     ],
+                                    'groups' => [
+                                        'name' => 'Group Name',
+                                    ],
+                                    'categories' => [
+                                        'name' => 'Category Name',
+                                    ],
                                     default => [
                                         'title' => 'Channel Title',
                                         'name' => 'Channel Name (tvg-name)',
@@ -2333,7 +2345,10 @@ class PlaylistResource extends Resource
                                         'info->genre' => 'Genre (metadata)',
                                     ],
                                 })
-                                ->default('title')
+                                ->default(fn (Get $get): string => match ($get('target')) {
+                                    'groups', 'categories', 'series' => 'name',
+                                    default => 'title',
+                                })
                                 ->required()
                                 ->columnSpan(2),
 
@@ -2376,7 +2391,6 @@ class PlaylistResource extends Resource
                 ->schema([
                     Toggle::make('sync_logs_enabled')
                         ->label('Enable Sync Logs')
-                        ->columnSpan('full')
                         ->inline(false)
                         ->live()
                         ->default(true)
@@ -2390,6 +2404,16 @@ class PlaylistResource extends Resource
                         ->inline(false)
                         ->default(true)
                         ->helperText('NOTE: You will need to re-sync your playlist, or wait for the next scheduled sync, if changing this. This will overwrite any existing channel sort order customization for this playlist.'),
+                    Toggle::make('disable_catchup')
+                        ->label('Disable catch-up')
+                        ->columnSpan(1)
+                        ->inline(false)
+                        ->default(false)
+                        ->hintIcon(
+                            'heroicon-m-question-mark-circle',
+                            tooltip: 'When enabled, catch-up attributes will be stripped from M3U output and Xtream API responses (tv_archive, tv_archive_duration, has_archive).'
+                        )
+                        ->helperText('Strip all catch-up related attributes from the playlist output and Xtream API. Useful when your provider\'s catch-up doesn\'t work or is unreliable.'),
                     Toggle::make('auto_channel_increment')
                         ->label('Auto channel number increment')
                         ->columnSpan(1)
