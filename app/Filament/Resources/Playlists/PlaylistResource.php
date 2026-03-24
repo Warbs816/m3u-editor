@@ -2379,6 +2379,61 @@ class PlaylistResource extends Resource
                             : null
                         ),
                 ]),
+            Section::make('Sort Alpha Rules')
+                ->description('Define sort rules that automatically run after each playlist sync. Rules execute in order.')
+                ->columnSpanFull()
+                ->collapsible()
+                ->collapsed($creating)
+                ->schema([
+                    Repeater::make('sort_alpha_config')
+                        ->label('')
+                        ->schema([
+                            Toggle::make('enabled')
+                                ->label('Enabled')
+                                ->default(true)
+                                ->inline(false)
+                                ->columnSpan(1),
+                            Select::make('target')
+                                ->label('Target')
+                                ->options([
+                                    'live_groups' => 'Live Groups',
+                                    'vod_groups' => 'VOD Groups',
+                                ])
+                                ->default('live_groups')
+                                ->required()
+                                ->columnSpan(2),
+                            Select::make('column')
+                                ->label('Sort By')
+                                ->options([
+                                    'title' => 'Title (or override if set)',
+                                    'name' => 'Name (or override if set)',
+                                    'stream_id' => 'ID (or override if set)',
+                                    'channel' => 'Channel No.',
+                                ])
+                                ->default('title')
+                                ->required()
+                                ->columnSpan(2),
+                            Select::make('sort')
+                                ->label('Sort Order')
+                                ->options([
+                                    'ASC' => 'A to Z or 0 to 9',
+                                    'DESC' => 'Z to A or 9 to 0',
+                                ])
+                                ->default('ASC')
+                                ->required()
+                                ->columnSpan(2),
+                        ])
+                        ->columns(7)
+                        ->reorderable()
+                        ->reorderableWithButtons()
+                        ->collapsible()
+                        ->defaultItems(0)
+                        ->addActionLabel('Add sort rule')
+                        ->itemLabel(fn (array $state): ?string => ($state['name'] ?? null)
+                            ? ($state['name'].($state['enabled'] ?? true ? '' : ' (disabled)'))
+                            : null
+                        ),
+                ]),
         ];
 
         $outputFields = [
