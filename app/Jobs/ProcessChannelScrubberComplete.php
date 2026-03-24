@@ -9,7 +9,6 @@ use Carbon\Carbon;
 use Filament\Notifications\Notification;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
-use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Log;
 use Throwable;
 
@@ -28,6 +27,7 @@ class ProcessChannelScrubberComplete implements ShouldQueue
      */
     public function __construct(
         public int $scrubberId,
+        public int $logId,
         public string $batchNo,
         public Carbon $start,
     ) {}
@@ -38,28 +38,30 @@ class ProcessChannelScrubberComplete implements ShouldQueue
     public function handle(): void
     {
         $scrubber = ChannelScrubber::find($this->scrubberId);
-        if (! $scrubber || $scrubber->uuid !== $this->batchNo || $scrubber->status === Status::Cancelled) {
+        if (! $scrubber || $scrubber->uuid !== $this->batchNo) {
+            ChannelScrubberLog::where('id', $this->logId)->update(['status' => 'cancelled']);
+
+            return;
+        }
+
+        if ($scrubber->status === Status::Cancelled) {
+            ChannelScrubberLog::where('id', $this->logId)->update(['status' => 'cancelled']);
+
             return;
         }
 
         $runtime = round($this->start->diffInSeconds(now()), 2);
-        $cacheKey = "channel_scrubber_dead_{$this->batchNo}";
-        $deadChannels = Cache::pull($cacheKey, []);
 
         $scrubber->refresh();
         $deadCount = $scrubber->dead_count;
         $channelCount = $scrubber->channel_count;
 
-        ChannelScrubberLog::create([
-            'channel_scrubber_id' => $scrubber->id,
-            'user_id' => $scrubber->user_id,
-            'playlist_id' => $scrubber->playlist_id,
+        ChannelScrubberLog::where('id', $this->logId)->update([
             'status' => 'completed',
             'channel_count' => $channelCount,
             'dead_count' => $deadCount,
             'disabled_count' => $deadCount,
             'runtime' => $runtime,
-            'meta' => $deadChannels,
         ]);
 
         // Trim logs to max 15 entries

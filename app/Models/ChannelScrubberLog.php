@@ -5,6 +5,7 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class ChannelScrubberLog extends Model
 {
@@ -21,13 +22,17 @@ class ChannelScrubberLog extends Model
             'dead_count' => 'integer',
             'disabled_count' => 'integer',
             'runtime' => 'float',
-            'meta' => 'array',
         ];
     }
 
     public function channelScrubber(): BelongsTo
     {
         return $this->belongsTo(ChannelScrubber::class);
+    }
+
+    public function deadChannels(): HasMany
+    {
+        return $this->hasMany(ChannelScrubberLogChannel::class);
     }
 
     public function user(): BelongsTo

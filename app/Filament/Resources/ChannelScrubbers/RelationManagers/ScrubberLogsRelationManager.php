@@ -41,7 +41,12 @@ class ScrubberLogsRelationManager extends RelationManager
                     ->toggleable(),
                 TextColumn::make('status')
                     ->badge()
-                    ->color(fn (string $state) => $state === 'completed' ? 'success' : 'danger')
+                    ->color(fn (string $state) => match ($state) {
+                        'completed' => 'success',
+                        'processing' => 'warning',
+                        'cancelled' => 'gray',
+                        default => 'danger',
+                    })
                     ->sortable()
                     ->toggleable(),
                 TextColumn::make('channel_count')
@@ -50,11 +55,14 @@ class ScrubberLogsRelationManager extends RelationManager
                     ->toggleable(),
                 TextColumn::make('dead_count')
                     ->label('Dead Links')
+                    ->badge()
                     ->color(fn ($state) => $state > 0 ? 'danger' : 'success')
                     ->sortable()
                     ->toggleable(),
                 TextColumn::make('disabled_count')
                     ->label('Channels Disabled')
+                    ->badge()
+                    ->color(fn ($state) => $state > 0 ? 'warning' : 'success')
                     ->sortable()
                     ->toggleable(),
                 TextColumn::make('runtime')

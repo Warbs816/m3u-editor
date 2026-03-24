@@ -5,10 +5,10 @@ namespace App\Jobs;
 use App\Enums\Status;
 use App\Models\Channel;
 use App\Models\ChannelScrubber;
+use App\Models\ChannelScrubberLogChannel;
 use Exception;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
-use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 use Symfony\Component\Process\Process as SymfonyProcess;
@@ -30,6 +30,7 @@ class ProcessChannelScrubberChunk implements ShouldQueue
     public function __construct(
         public array $channelIds,
         public int $scrubberId,
+        public int $logId,
         public string $checkMethod,
         public string $batchNo,
         public int $totalChannels,
@@ -46,7 +47,7 @@ class ProcessChannelScrubberChunk implements ShouldQueue
         }
 
         $channels = Channel::whereIn('id', $this->channelIds)->get();
-        $deadChannels = [];
+        $deadCount = 0;
 
         foreach ($channels as $channel) {
             try {
@@ -55,32 +56,27 @@ class ProcessChannelScrubberChunk implements ShouldQueue
                     : $this->checkViaHttp($channel);
 
                 if ($isDead) {
-                    $deadChannels[] = [
-                        'id' => $channel->id,
+                    ChannelScrubberLogChannel::create([
+                        'channel_scrubber_log_id' => $this->logId,
+                        'channel_id' => $channel->id,
                         'title' => $channel->title,
                         'url' => $channel->url_custom ?? $channel->url,
-                    ];
+                    ]);
 
                     $channel->update(['enabled' => false]);
+                    $deadCount++;
                 }
             } catch (Exception $e) {
                 Log::warning("Channel scrubber: error checking channel #{$channel->id} \"{$channel->title}\": {$e->getMessage()}");
             }
         }
 
-        if (! empty($deadChannels)) {
-            // Atomically append dead channels to Redis list for aggregation by the complete job
-            $cacheKey = "channel_scrubber_dead_{$this->batchNo}";
-            $existing = Cache::get($cacheKey, []);
-            Cache::put($cacheKey, array_merge($existing, $deadChannels), now()->addHours(4));
-
-            // Atomically increment the dead count on the scrubber record
-            ChannelScrubber::where('id', $this->scrubberId)
-                ->increment('dead_count', count($deadChannels));
+        if ($deadCount > 0) {
+            ChannelScrubber::where('id', $this->scrubberId)->increment('dead_count', $deadCount);
         }
 
         // Increment progress
-        $processed = count($this->channelIds);
+        $processed = \count($this->channelIds);
         if ($this->totalChannels > 0) {
             $increment = ($processed / $this->totalChannels) * 90;
             $scrubber->refresh();

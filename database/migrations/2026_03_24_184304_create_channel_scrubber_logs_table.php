@@ -18,12 +18,11 @@ return new class extends Migration
             $table->foreignId('channel_scrubber_id')->constrained()->cascadeOnDelete()->cascadeOnUpdate();
             $table->foreignId('user_id')->constrained()->cascadeOnDelete()->cascadeOnUpdate();
             $table->foreignId('playlist_id')->nullable()->constrained()->nullOnDelete()->cascadeOnUpdate();
-            $table->enum('status', ['completed', 'failed'])->default('completed');
+            $table->enum('status', ['processing', 'completed', 'cancelled', 'failed'])->default('processing');
             $table->unsignedBigInteger('channel_count')->default(0);
             $table->unsignedBigInteger('dead_count')->default(0);
             $table->unsignedBigInteger('disabled_count')->default(0);
             $table->float('runtime')->nullable();
-            $table->json('meta')->nullable();
             $table->timestamps();
         });
 

@@ -4,6 +4,7 @@ namespace App\Jobs;
 
 use App\Enums\Status;
 use App\Models\ChannelScrubber;
+use App\Models\ChannelScrubberLog;
 use Exception;
 use Filament\Notifications\Notification;
 use Illuminate\Contracts\Queue\ShouldQueue;
@@ -79,6 +80,14 @@ class ProcessChannelScrubber implements ShouldQueue
                 'progress' => 3,
             ]);
 
+            $log = ChannelScrubberLog::create([
+                'channel_scrubber_id' => $scrubber->id,
+                'user_id' => $scrubber->user_id,
+                'playlist_id' => $scrubber->playlist_id,
+                'status' => 'processing',
+                'channel_count' => $channelCount,
+            ]);
+
             $channelIds = $query->pluck('id')->toArray();
             $chunks = array_chunk($channelIds, 50);
 
@@ -87,6 +96,7 @@ class ProcessChannelScrubber implements ShouldQueue
                 $jobs[] = new ProcessChannelScrubberChunk(
                     channelIds: $chunk,
                     scrubberId: $scrubber->id,
+                    logId: $log->id,
                     checkMethod: $scrubber->check_method,
                     batchNo: $batchNo,
                     totalChannels: $channelCount,
@@ -95,6 +105,7 @@ class ProcessChannelScrubber implements ShouldQueue
 
             $jobs[] = new ProcessChannelScrubberComplete(
                 scrubberId: $scrubber->id,
+                logId: $log->id,
                 batchNo: $batchNo,
                 start: $start,
             );

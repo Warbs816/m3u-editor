@@ -4,6 +4,7 @@ namespace App\Filament\Resources\ChannelScrubbers\Resources\ChannelScrubberLogs;
 
 use App\Filament\Resources\ChannelScrubbers\ChannelScrubberResource;
 use App\Filament\Resources\ChannelScrubbers\Resources\ChannelScrubberLogs\Pages\ViewChannelScrubberLog;
+use App\Filament\Resources\ChannelScrubbers\Resources\ChannelScrubberLogs\RelationManagers\DeadChannelsRelationManager;
 use App\Models\ChannelScrubberLog;
 use App\Services\DateFormatService;
 use Filament\Actions\DeleteAction;
@@ -47,6 +48,7 @@ class ChannelScrubberLogResource extends Resource
             ->components([
                 Section::make('Run Summary')
                     ->columnSpanFull()
+                    ->compact()
                     ->columns(3)
                     ->schema([
                         Infolists\Components\TextEntry::make('created_at')
@@ -54,7 +56,12 @@ class ChannelScrubberLogResource extends Resource
                             ->formatStateUsing(fn ($state) => app(DateFormatService::class)->format($state)),
                         Infolists\Components\TextEntry::make('status')
                             ->badge()
-                            ->color(fn (string $state) => $state === 'completed' ? 'success' : 'danger'),
+                            ->color(fn (string $state) => match ($state) {
+                                'completed' => 'success',
+                                'processing' => 'warning',
+                                'cancelled' => 'gray',
+                                default => 'danger',
+                            }),
                         Infolists\Components\TextEntry::make('runtime')
                             ->label('Runtime')
                             ->formatStateUsing(fn ($state): string => $state ? gmdate('H:i:s', (int) $state) : '-'),
@@ -62,29 +69,13 @@ class ChannelScrubberLogResource extends Resource
                             ->label('Channels Checked'),
                         Infolists\Components\TextEntry::make('dead_count')
                             ->label('Dead Links Found')
+                            ->badge()
                             ->color(fn ($state) => $state > 0 ? 'danger' : 'success'),
                         Infolists\Components\TextEntry::make('disabled_count')
                             ->label('Channels Disabled')
+                            ->badge()
                             ->color(fn ($state) => $state > 0 ? 'warning' : 'success'),
                     ]),
-                Section::make('Dead Channels')
-                    ->columnSpanFull()
-                    ->schema([
-                        Infolists\Components\RepeatableEntry::make('meta')
-                            ->label(false)
-                            ->hiddenLabel()
-                            ->schema([
-                                Infolists\Components\TextEntry::make('title')
-                                    ->label('Channel'),
-                                Infolists\Components\TextEntry::make('url')
-                                    ->label('URL')
-                                    ->columnSpan(2),
-                            ])
-                            ->columns(3)
-                            ->contained(false)
-                            ->placeholder('No dead channels recorded for this run.'),
-                    ])
-                    ->hidden(fn ($record) => empty($record->meta)),
             ]);
     }
 
@@ -101,7 +92,12 @@ class ChannelScrubberLogResource extends Resource
                     ->toggleable(),
                 TextColumn::make('status')
                     ->badge()
-                    ->color(fn (string $state) => $state === 'completed' ? 'success' : 'danger')
+                    ->color(fn (string $state) => match ($state) {
+                        'completed' => 'success',
+                        'processing' => 'warning',
+                        'cancelled' => 'gray',
+                        default => 'danger',
+                    })
                     ->sortable()
                     ->toggleable(),
                 TextColumn::make('channel_count')
@@ -110,11 +106,14 @@ class ChannelScrubberLogResource extends Resource
                     ->toggleable(),
                 TextColumn::make('dead_count')
                     ->label('Dead Links')
+                    ->badge()
                     ->color(fn ($state) => $state > 0 ? 'danger' : 'success')
                     ->sortable()
                     ->toggleable(),
                 TextColumn::make('disabled_count')
                     ->label('Channels Disabled')
+                    ->badge()
+                    ->color(fn ($state) => $state > 0 ? 'warning' : 'success')
                     ->sortable()
                     ->toggleable(),
                 TextColumn::make('runtime')
@@ -137,7 +136,9 @@ class ChannelScrubberLogResource extends Resource
 
     public static function getRelations(): array
     {
-        return [];
+        return [
+            DeadChannelsRelationManager::class,
+        ];
     }
 
     public static function getPages(): array
