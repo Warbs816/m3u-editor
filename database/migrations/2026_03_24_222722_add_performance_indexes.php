@@ -14,8 +14,7 @@ return new class extends Migration
         // Channels: VOD/Live filtering by user (XtreamApiController, PlaylistController)
         Schema::table('channels', function (Blueprint $table) {
             $table->index(['user_id', 'is_vod', 'enabled'], 'idx_channels_user_vod_enabled');
-            $table->index('is_custom', 'idx_channels_is_custom');
-            $table->index(['playlist_id', 'is_vod', 'enabled'], 'idx_channels_playlist_vod_enabled');
+            $table->index(['playlist_id', 'enabled', 'is_vod'], 'idx_channels_playlist_enabled_vod');
             $table->index('custom_playlist_id', 'idx_channels_custom_playlist_id');
         });
 
@@ -53,8 +52,7 @@ return new class extends Migration
     {
         Schema::table('channels', function (Blueprint $table) {
             $table->dropIndex('idx_channels_user_vod_enabled');
-            $table->dropIndex('idx_channels_is_custom');
-            $table->dropIndex('idx_channels_playlist_vod_enabled');
+            $table->dropIndex('idx_channels_playlist_enabled_vod');
             $table->dropIndex('idx_channels_custom_playlist_id');
         });
 
