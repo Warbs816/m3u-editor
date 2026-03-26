@@ -21,9 +21,15 @@ class ValidatePlugins extends Command
             ->get();
 
         if ($plugins->isEmpty()) {
-            $this->error('No matching plugins found.');
+            if ($pluginId) {
+                $this->error('No matching plugins found.');
 
-            return self::FAILURE;
+                return self::FAILURE;
+            }
+
+            $this->info('No plugins to validate.');
+
+            return self::SUCCESS;
         }
 
         foreach ($plugins as $plugin) {
