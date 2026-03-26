@@ -17,6 +17,8 @@ class Plugin implements ChannelProcessorPluginInterface, HookablePluginInterface
 {
     private const CDN_BASE = 'https://cdn.jsdelivr.net/gh/tv-logo/tv-logos@main/countries';
 
+    private const INDEX_API_BASE = 'https://api.github.com/repos/tv-logo/tv-logos/contents/countries';
+
     private const CACHE_FILE = 'plugin-data/tv-logos/matches.json';
 
     /**
@@ -179,6 +181,15 @@ class Plugin implements ChannelProcessorPluginInterface, HookablePluginInterface
 
         $cache = $this->loadCache($cacheTtlDays);
 
+        $cacheChanged = false;
+        $index = $this->fetchCountryIndex($countryCode, $countryFolder, $cache, $cacheChanged);
+
+        if ($index !== []) {
+            $context->info(sprintf('Loaded index of %d known logos for %s.', count($index), $countryFolder));
+        } else {
+            $context->info('Logo index unavailable — falling back to per-channel CDN HEAD checks (slower).');
+        }
+
         $query = Channel::query()
             ->where('playlist_id', $playlistId)
             ->where('enabled', true)
@@ -216,9 +227,8 @@ class Plugin implements ChannelProcessorPluginInterface, HookablePluginInterface
         $matched = 0;
         $cacheHits = 0;
         $cacheMisses = 0;
-        $cacheChanged = false;
 
-        foreach ($channels as $index => $channel) {
+        foreach ($channels as $i => $channel) {
             $displayName = trim((string) ($channel->title_custom ?? $channel->title ?? $channel->name_custom ?? $channel->name ?? ''));
 
             if ($displayName === '') {
@@ -231,7 +241,7 @@ class Plugin implements ChannelProcessorPluginInterface, HookablePluginInterface
                 $logoUrl = $cache['matches'][$cacheKey] ?: null;
                 $cacheHits++;
             } else {
-                $logoUrl = $this->resolveLogoUrl($displayName, $countryCode, $countryFolder);
+                $logoUrl = $this->resolveLogoUrl($displayName, $countryCode, $countryFolder, $index);
                 $cache['matches'][$cacheKey] = $logoUrl ?? '';
                 $cacheChanged = true;
                 $cacheMisses++;
@@ -246,8 +256,8 @@ class Plugin implements ChannelProcessorPluginInterface, HookablePluginInterface
                 }
             }
 
-            if (($index + 1) % 20 === 0) {
-                $context->progress = (int) ((($index + 1) / $total) * 100);
+            if (($i + 1) % 20 === 0) {
+                $context->progress = (int) ((($i + 1) / $total) * 100);
                 $context->heartbeat();
             }
         }
@@ -272,12 +282,18 @@ class Plugin implements ChannelProcessorPluginInterface, HookablePluginInterface
     /**
      * Attempt to resolve a CDN logo URL for the given channel name.
      *
+     * When an index is available (fetched once per run from the GitHub Contents
+     * API), resolution is a pure O(1) array lookup — no HTTP requests per channel.
+     * Falls back to sequential CDN HEAD checks only when the index is unavailable.
+     *
      * Tries three slug variants in order:
-     *   1. {slug}-{cc}.png       — e.g. bbc-one-gb.png
-     *   2. {slug}.png            — e.g. bbc-one.png
-     *   3. {shortened-slug}-{cc}.png — e.g. bbc-gb.png (last word stripped)
+     *   1. {slug}-{cc}.png            — e.g. bbc-one-gb.png
+     *   2. {slug}.png                 — e.g. bbc-one.png
+     *   3. {shortened-slug}-{cc}.png  — e.g. bbc-gb.png (last word stripped)
+     *
+     * @param  array<string, true>  $index  Filename → true map; empty array triggers HEAD fallback.
      */
-    private function resolveLogoUrl(string $channelName, string $countryCode, string $countryFolder): ?string
+    private function resolveLogoUrl(string $channelName, string $countryCode, string $countryFolder, array $index): ?string
     {
         $slug = $this->slugify($channelName);
 
@@ -301,12 +317,60 @@ class Plugin implements ChannelProcessorPluginInterface, HookablePluginInterface
         foreach ($candidates as $filename) {
             $url = self::CDN_BASE."/{$countryFolder}/{$filename}";
 
-            if ($this->urlExists($url)) {
+            $exists = $index !== []
+                ? isset($index[$filename])
+                : $this->urlExists($url);
+
+            if ($exists) {
                 return $url;
             }
         }
 
         return null;
+    }
+
+    /**
+     * Fetch the set of known logo filenames for a country folder from the
+     * GitHub Contents API and store it in the cache.
+     *
+     * Returns a map of lowercase filename → true for O(1) lookups.
+     * Returns an empty array on failure so callers can fall back to HEAD checks.
+     *
+     * @param  array<string, mixed>  $cache
+     * @return array<string, true>
+     */
+    private function fetchCountryIndex(string $countryCode, string $countryFolder, array &$cache, bool &$cacheChanged): array
+    {
+        $cacheKey = "index:{$countryCode}";
+
+        if (array_key_exists($cacheKey, $cache) && is_array($cache[$cacheKey])) {
+            return $cache[$cacheKey];
+        }
+
+        try {
+            $response = Http::timeout(15)
+                ->withHeaders([
+                    'Accept' => 'application/vnd.github.v3+json',
+                    'User-Agent' => 'tv-logos-plugin/1.0',
+                ])
+                ->get(self::INDEX_API_BASE.'/'.$countryFolder);
+
+            if ($response->successful()) {
+                $index = collect($response->json() ?? [])
+                    ->filter(fn ($f) => is_array($f) && ($f['type'] ?? '') === 'file' && str_ends_with($f['name'] ?? '', '.png'))
+                    ->mapWithKeys(fn ($f) => [strtolower((string) $f['name']) => true])
+                    ->all();
+
+                $cache[$cacheKey] = $index;
+                $cacheChanged = true;
+
+                return $index;
+            }
+        } catch (Throwable) {
+            // Index unavailable — fall back to per-channel HEAD checks.
+        }
+
+        return [];
     }
 
     private function urlExists(string $url): bool
@@ -359,7 +423,7 @@ class Plugin implements ChannelProcessorPluginInterface, HookablePluginInterface
      */
     private function loadCache(int $cacheTtlDays): array
     {
-        $empty = ['version' => 1, 'cached_at' => now()->toIso8601String(), 'matches' => []];
+        $empty = ['version' => 2, 'cached_at' => now()->toIso8601String(), 'matches' => []];
 
         try {
             if (! Storage::disk('local')->exists(self::CACHE_FILE)) {
@@ -368,7 +432,7 @@ class Plugin implements ChannelProcessorPluginInterface, HookablePluginInterface
 
             $data = json_decode((string) Storage::disk('local')->get(self::CACHE_FILE), true);
 
-            if (! is_array($data) || ! isset($data['matches'])) {
+            if (! is_array($data) || ! isset($data['matches']) || ($data['version'] ?? 1) < 2) {
                 return $empty;
             }
 
