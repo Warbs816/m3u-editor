@@ -336,7 +336,7 @@ class ListChannels extends ListRecords
 
         return [
             'all' => Tab::make('All Playlists')
-                ->badge(Channel::where($where)->count()),
+                ->badge($playlistCounts->sum()),
             ...($playlists->mapWithKeys(fn (Playlist $playlist) => [
                 'playlist_'.$playlist->id => Tab::make($playlist->name)
                     ->modifyQueryUsing(fn ($query) => $query->where('playlist_id', $playlist->id))
@@ -438,12 +438,16 @@ class ListChannels extends ListRecords
             }
         }
 
+        $counts = (clone $baseQuery)
+            ->selectRaw('count(*) as all_count, sum(case when enabled then 1 else 0 end) as enabled_count, sum(case when not enabled then 1 else 0 end) as disabled_count, sum(case when is_custom then 1 else 0 end) as custom_count')
+            ->first();
+
         return [
-            'all' => (clone $baseQuery)->count(),
-            'enabled' => (clone $baseQuery)->where('enabled', true)->count(),
-            'disabled' => (clone $baseQuery)->where('enabled', false)->count(),
+            'all' => (int) ($counts->all_count ?? 0),
+            'enabled' => (int) ($counts->enabled_count ?? 0),
+            'disabled' => (int) ($counts->disabled_count ?? 0),
             'failover' => (clone $baseQuery)->whereHas('failovers')->count(),
-            'custom' => (clone $baseQuery)->where('is_custom', true)->count(),
+            'custom' => (int) ($counts->custom_count ?? 0),
         ];
     }
 
