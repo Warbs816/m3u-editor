@@ -12,6 +12,8 @@ use App\Models\Playlist;
 use App\Models\Plugin;
 use App\Models\PluginRun;
 use App\Plugins\PluginSchemaMapper;
+use Filament\Actions\Action;
+use Filament\Actions\EditAction;
 use Filament\Forms\Components\Placeholder;
 use Filament\Forms\Components\Textarea;
 use Filament\Forms\Components\TextInput;
@@ -23,6 +25,7 @@ use Filament\Schemas\Components\Tabs\Tab;
 use Filament\Schemas\Schema;
 use Filament\Tables\Columns\IconColumn;
 use Filament\Tables\Columns\TextColumn;
+use Filament\Tables\Enums\RecordActionsPosition;
 use Filament\Tables\Table;
 use Illuminate\Support\HtmlString;
 use Illuminate\Support\Str;
@@ -223,7 +226,29 @@ class PluginResource extends Resource
                 TextColumn::make('updated_at')
                     ->since()
                     ->sortable(),
-            ]);
+            ])
+            ->recordActions([
+                EditAction::make()
+                    ->button()
+                    ->hiddenLabel()
+                    ->size('sm'),
+                Action::make('toggle_enabled')
+                    ->button()
+                    ->size('sm')
+                    ->hiddenLabel()
+                    ->tooltip(fn (Plugin $record) => $record->enabled ? 'Disable this plugin' : 'Enable this plugin')
+                    ->label(fn (Plugin $record) => $record->enabled ? 'Disable' : 'Enable')
+                    ->color(fn (Plugin $record) => $record->enabled ? 'warning' : 'success')
+                    ->icon(fn (Plugin $record) => $record->enabled ? 'heroicon-o-x-circle' : 'heroicon-o-check-circle')
+                    ->modalIcon(fn (Plugin $record) => $record->enabled ? 'heroicon-m-x-circle' : 'heroicon-m-check-circle')
+                    ->visible(fn (Plugin $record) => $record->isTrusted() && $record->isInstalled() && ! $record->isBlocked())
+                    ->requiresConfirmation(fn (Plugin $record) => $record->enabled)
+                    ->modalHeading(fn (Plugin $record) => $record->enabled ? "Disable {$record->name}?" : "Enable {$record->name}?")
+                    ->modalDescription(fn (Plugin $record) => $record->enabled ? 'This will stop the plugin from responding to hooks and running actions.' : 'This will allow the plugin to respond to hooks and run actions.')
+                    ->modalSubmitActionLabel(fn (Plugin $record) => $record->enabled ? 'Disable' : 'Enable')
+                    ->modalWidth('sm')
+                    ->action(fn (Plugin $record) => $record->update(['enabled' => ! $record->enabled])),
+            ], RecordActionsPosition::BeforeCells);
     }
 
     public static function getRelations(): array
