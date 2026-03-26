@@ -35,6 +35,17 @@
   },
   "settings": [
     {
+      "id": "default_playlist_id",
+      "label": "Default Playlist(s)",
+      "type": "model_select",
+      "model": "App\\Models\\Playlist",
+      "label_attribute": "name",
+      "scope": "owned",
+      "multiple": true,
+      "helper_text": "Playlists to enrich automatically after each sync. Leave empty to disable automatic enrichment.",
+      "default": null
+    },
+    {
       "id": "country_code",
       "label": "Country Code (e.g. us, gb, de, fr)",
       "type": "text",
@@ -42,7 +53,7 @@
     },
     {
       "id": "overwrite_existing",
-      "label": "Overwrite channels that already have a custom logo",
+      "label": "Overwrite channels that already have a logo",
       "type": "boolean",
       "default": false
     },
@@ -73,8 +84,12 @@
       "fields": [
         {
           "id": "playlist_id",
-          "label": "Playlist ID",
-          "type": "number"
+          "label": "Playlist",
+          "type": "model_select",
+          "model": "App\\Models\\Playlist",
+          "label_attribute": "name",
+          "scope": "owned",
+          "required": true
         }
       ]
     }

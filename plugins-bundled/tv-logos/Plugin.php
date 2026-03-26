@@ -106,6 +106,17 @@ class Plugin implements ChannelProcessorPluginInterface, HookablePluginInterface
             return PluginActionResult::failure('Missing playlist_id in hook payload.');
         }
 
+        $configured = $context->settings['default_playlist_id'] ?? null;
+        $watchedIds = array_map('intval', array_filter((array) $configured));
+
+        if ($watchedIds === []) {
+            return PluginActionResult::success('No default playlist(s) configured — skipping automatic enrichment.');
+        }
+
+        if (! in_array($playlistId, $watchedIds, true)) {
+            return PluginActionResult::success("Playlist #{$playlistId} is not in the configured defaults — skipping.");
+        }
+
         return $this->processPlaylist($playlistId, $context);
     }
 
@@ -257,8 +268,7 @@ class Plugin implements ChannelProcessorPluginInterface, HookablePluginInterface
             }
 
             if (($i + 1) % 20 === 0) {
-                $context->progress = (int) ((($i + 1) / $total) * 100);
-                $context->heartbeat();
+                $context->heartbeat(progress: (int) ((($i + 1) / $total) * 100));
             }
         }
 

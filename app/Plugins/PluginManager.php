@@ -1962,17 +1962,21 @@ class PluginManager
                 continue;
             }
 
-            $model = $modelClass::query()->find($value);
-            if (! $model) {
-                continue;
-            }
+            $ids = is_array($value) ? array_filter($value) : [$value];
 
-            if (! array_key_exists('user_id', $model->getAttributes())) {
-                throw new RuntimeException("Owned plugin field [{$fieldId}] cannot be enforced because [{$modelClass}] does not expose a user_id column.");
-            }
+            foreach ($ids as $id) {
+                $model = $modelClass::query()->find($id);
+                if (! $model) {
+                    continue;
+                }
 
-            if ((int) $model->getAttribute('user_id') !== (int) $user->id) {
-                throw new RuntimeException("You do not have access to the selected resource for [{$fieldId}].");
+                if (! array_key_exists('user_id', $model->getAttributes())) {
+                    throw new RuntimeException("Owned plugin field [{$fieldId}] cannot be enforced because [{$modelClass}] does not expose a user_id column.");
+                }
+
+                if ((int) $model->getAttribute('user_id') !== (int) $user->id) {
+                    throw new RuntimeException("You do not have access to the selected resource for [{$fieldId}].");
+                }
             }
         }
     }

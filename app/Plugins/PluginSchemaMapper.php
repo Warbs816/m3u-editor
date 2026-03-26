@@ -104,12 +104,13 @@ class PluginSchemaMapper
     {
         $modelClass = $field['model'] ?? null;
         $labelAttribute = $field['label_attribute'] ?? 'name';
+        $multiple = (bool) ($field['multiple'] ?? false);
 
         if (! is_string($modelClass) || ! class_exists($modelClass) || ! is_subclass_of($modelClass, Model::class)) {
             throw new InvalidArgumentException("Invalid model_select model for [{$name}]");
         }
 
-        return Select::make($name)
+        $select = Select::make($name)
             ->searchable()
             ->preload()
             ->options(function () use ($field, $modelClass, $labelAttribute) {
@@ -125,6 +126,12 @@ class PluginSchemaMapper
                     ->pluck($labelAttribute, 'id')
                     ->toArray();
             });
+
+        if ($multiple) {
+            $select->multiple();
+        }
+
+        return $select;
     }
 
     private function rulesForFields(array $fields, string $prefix = ''): array
@@ -138,14 +145,27 @@ class PluginSchemaMapper
             }
 
             $name = $prefix.$fieldId;
-            $fieldRules = [];
             $required = (bool) ($field['required'] ?? false);
+            $type = $field['type'] ?? 'text';
+            $multiple = $type === 'model_select' && (bool) ($field['multiple'] ?? false);
 
-            $fieldRules[] = $required ? 'required' : 'nullable';
+            if ($multiple) {
+                // Parent rule: nullable array (or required with at least one item).
+                $rules[$name] = [$required ? 'required' : 'nullable', 'array'];
+                if ($required) {
+                    $rules[$name][] = 'min:1';
+                }
+                // Per-item rule applied via wildcard.
+                $rules[$name.'.*'] = ['integer', $this->modelSelectExistsRule($field)];
+
+                continue;
+            }
+
+            $fieldRules = [$required ? 'required' : 'nullable'];
 
             $fieldRules = [
                 ...$fieldRules,
-                ...match ($field['type'] ?? 'text') {
+                ...match ($type) {
                     'boolean' => ['boolean'],
                     'number' => ['numeric'],
                     'textarea', 'text' => ['string'],

@@ -4,6 +4,7 @@ namespace App\Filament\Resources\Plugins\RelationManagers;
 
 use App\Filament\Resources\Plugins\PluginResource;
 use App\Models\PluginRun;
+use App\Services\DateFormatService;
 use Filament\Actions\Action;
 use Filament\Resources\RelationManagers\RelationManager;
 use Filament\Schemas\Components\Tabs\Tab;
@@ -70,7 +71,7 @@ class RunsRelationManager extends RelationManager
                             ->label('Queued')
                             ->since()
                             ->color('gray')
-                            ->tooltip(fn (PluginRun $record): ?string => $record->created_at?->toDateTimeString()),
+                            ->tooltip(fn (PluginRun $record): ?string => $record->created_at ? app(DateFormatService::class)->format($record->created_at) : null),
                     ]),
                     Stack::make([
                         TextColumn::make('status')

@@ -12,6 +12,7 @@ use App\Models\Playlist;
 use App\Models\Plugin;
 use App\Models\PluginRun;
 use App\Plugins\PluginSchemaMapper;
+use App\Services\DateFormatService;
 use Filament\Actions\Action;
 use Filament\Actions\EditAction;
 use Filament\Forms\Components\Placeholder;
@@ -300,7 +301,7 @@ class PluginResource extends Resource
         $runBadge = $focusRun ? self::runStatusBadge($focusRun) : self::mutedBadge('No runs yet');
         $summary = $focusRun?->summary ?: 'Use the header actions to run this plugin once, then track the job from Live Activity and Run History.';
         $runLink = $focusRun
-            ? '<a href="'.e(self::getUrl('run', ['record' => $record, 'run' => $focusRun])).'" class="inline-flex items-center rounded-full border border-primary-200 bg-white/90 px-3 py-1.5 text-xs font-semibold text-primary-700 shadow-sm hover:bg-primary-50 dark:border-primary-800 dark:bg-gray-900/80 dark:text-primary-300 dark:hover:bg-primary-950/60">Open focus run</a>'
+            ? '<a href="'.e(self::getUrl('run', ['record' => $record, 'run' => $focusRun])).'" class="inline-flex items-center rounded-full border border-primary-200 bg-white/90 px-3 py-1.5 text-xs font-semibold text-primary-700 shadow-sm hover:bg-primary-50 dark:border-primary-800 dark:bg-gray-900/80 dark:text-primary-300 dark:hover:bg-primary-950/60">Inspect this run</a>'
             : null;
 
         return '
@@ -328,10 +329,10 @@ class PluginResource extends Resource
                         <div class="text-[11px] font-semibold uppercase tracking-[0.18em] text-gray-500 dark:text-gray-400">Operator posture</div>
                         <div class="mt-3 text-sm leading-6 text-gray-700 dark:text-gray-200">'.e($summary).'</div>
                         <div class="mt-5 space-y-3">
-                            '.self::stackedStat('Last validation', $record->last_validated_at?->toDateTimeString() ?? 'Not validated yet').'
-                            '.self::stackedStat('Focus run', $focusRun?->created_at?->toDateTimeString() ?? 'No runs queued yet').'
+                            '.self::stackedStat('Last validation', app(DateFormatService::class)->format($record->last_validated_at, 'Not validated yet')).'
+                            '.self::stackedStat('Focus run', app(DateFormatService::class)->format($focusRun?->created_at, 'No runs queued yet')).'
                             '.self::stackedStat('Source', e(Str::headline($record->source_type ?? 'local'))).'
-                            '.self::stackedStat('Trusted by', e($record->trusted_at?->toDateTimeString() ?? 'Awaiting admin review')).'
+                            '.self::stackedStat('Trusted by', e(app(DateFormatService::class)->format($record->trusted_at, 'Awaiting admin review'))).'
                         </div>
                         <div class="mt-5 flex flex-wrap gap-2">
                             '.$runLink.'
@@ -353,8 +354,8 @@ class PluginResource extends Resource
 
         return self::stackedLines([
             '<span class="font-medium">'.e(Str::headline($latestRun->status)).'</span>',
-            $latestRun->started_at ? 'Started: '.e($latestRun->started_at->toDateTimeString()) : null,
-            $latestRun->finished_at ? 'Finished: '.e($latestRun->finished_at->toDateTimeString()) : null,
+            $latestRun->started_at ? 'Started: '.e(app(DateFormatService::class)->format($latestRun->started_at)) : null,
+            $latestRun->finished_at ? 'Finished: '.e(app(DateFormatService::class)->format($latestRun->finished_at)) : null,
             $latestRun->summary ? '<span class="text-sm">'.e($latestRun->summary).'</span>' : null,
             '<a href="'.e(self::getUrl('run', ['record' => $record, 'run' => $latestRun])).'" class="inline-flex items-center rounded-md border border-primary-200 bg-primary-50 px-2.5 py-1.5 text-xs font-medium text-primary-700 hover:bg-primary-100 dark:border-primary-800 dark:bg-primary-950/40 dark:text-primary-300 dark:hover:bg-primary-900/60">Open run details</a>',
         ]);
@@ -389,7 +390,7 @@ class PluginResource extends Resource
                     <div class="text-sm text-gray-600 dark:text-gray-300">'.e($latestRun->summary ?: 'No summary has been written yet.').'</div>
                 </div>
                 <div class="grid gap-3 sm:grid-cols-2">
-                    '.self::stackedStat('Queued', $latestRun->created_at?->toDateTimeString() ?? 'Unknown time').'
+                    '.self::stackedStat('Queued', app(DateFormatService::class)->format($latestRun->created_at, 'Unknown time')).'
                     '.self::stackedStat('Invocation', e(Str::headline($latestRun->invocation_type))).'
                 </div>
                 '.($totals !== '' ? '<div class="grid gap-2 sm:grid-cols-2">'.$totals.'</div>' : '').'
@@ -644,24 +645,36 @@ class PluginResource extends Resource
 
     protected static function playlistLabel(mixed $playlistId): string
     {
-        if (! $playlistId) {
+        $ids = is_array($playlistId) ? array_filter($playlistId) : ($playlistId ? [$playlistId] : []);
+
+        if ($ids === []) {
             return 'No playlist default';
         }
 
-        $playlist = Playlist::query()->find($playlistId);
+        $names = Playlist::query()
+            ->whereIn('id', $ids)
+            ->orderBy('name')
+            ->pluck('name')
+            ->all();
 
-        return $playlist ? $playlist->name.' (#'.$playlist->id.')' : 'Playlist #'.$playlistId;
+        return $names !== [] ? implode(', ', $names) : 'No playlist default';
     }
 
     protected static function epgLabel(mixed $epgId): string
     {
-        if (! $epgId) {
+        $ids = is_array($epgId) ? array_filter($epgId) : ($epgId ? [$epgId] : []);
+
+        if ($ids === []) {
             return 'No EPG default';
         }
 
-        $epg = Epg::query()->find($epgId);
+        $names = Epg::query()
+            ->whereIn('id', $ids)
+            ->orderBy('name')
+            ->pluck('name')
+            ->all();
 
-        return $epg ? $epg->name.' (#'.$epg->id.')' : 'EPG #'.$epgId;
+        return $names !== [] ? implode(', ', $names) : 'No EPG default';
     }
 
     protected static function ownershipSummary(Plugin $record): string

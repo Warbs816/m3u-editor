@@ -4,6 +4,7 @@ namespace App\Filament\Resources\Plugins\RelationManagers;
 
 use App\Filament\Resources\Plugins\PluginResource;
 use App\Models\PluginRunLog;
+use App\Services\DateFormatService;
 use Filament\Actions\Action;
 use Filament\Resources\RelationManagers\RelationManager;
 use Filament\Schemas\Components\Tabs\Tab;
@@ -53,7 +54,7 @@ class LogsRelationManager extends RelationManager
                             ->label('Seen')
                             ->since()
                             ->color('gray')
-                            ->tooltip(fn (PluginRunLog $record): ?string => $record->created_at?->toDateTimeString()),
+                            ->tooltip(fn (PluginRunLog $record): ?string => $record->created_at ? app(DateFormatService::class)->format($record->created_at) : null),
                     ]),
                     Stack::make([
                         TextColumn::make('level')
@@ -159,7 +160,7 @@ class LogsRelationManager extends RelationManager
         return [
             'all' => Tab::make('All Activity')
                 ->badge($allCount),
-            'running' => Tab::make('Running Run')
+            'running' => Tab::make('Running')
                 ->badge($runningCount)
                 ->badgeColor('warning')
                 ->modifyQueryUsing(fn (Builder $query) => $query->whereHas('run', fn (Builder $runQuery) => $runQuery->where('status', 'running'))),
