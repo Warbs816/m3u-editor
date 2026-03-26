@@ -23,7 +23,7 @@ class ExtensionsDashboard extends Page
 
     protected static ?int $navigationSort = 1;
 
-    protected static string|\BackedEnum|null $navigationIcon = 'heroicon-o-puzzle-piece';
+    protected static string|\BackedEnum|null $navigationIcon = null;
 
     protected string $view = 'filament.pages.extensions-dashboard';
 
