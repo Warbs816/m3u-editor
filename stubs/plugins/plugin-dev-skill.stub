@@ -1,0 +1,165 @@
+---
+name: plugin-dev
+description: "Guide for developing the {{ plugin_id }} plugin for m3u-editor. Use when writing plugin logic, adding actions, settings, hooks, or database schema. Covers the full plugin API: PluginExecutionContext, PluginActionResult, contracts, manifest structure, and testing patterns."
+allowed-tools: [Read, Write, Edit, Glob, Grep, Bash]
+---
+
+# {{ display_name }} Plugin Development
+
+This skill helps you build the `{{ plugin_id }}` plugin for m3u-editor.
+
+## Quick Reference
+
+Read `CLAUDE.md` in this plugin's root for the full API reference including:
+- All contract interfaces and method signatures
+- PluginExecutionContext API (logging, progress, heartbeats, state, cancellation)
+- PluginActionResult constructors
+- Settings field types and action declarations
+- Database access and file storage patterns
+
+Read `AGENTS.md` for architectural rules, permission reference, and security model.
+
+## Plugin Development Workflow
+
+### 1. Define What the Plugin Does
+
+Edit `plugin.json` to declare:
+- **capabilities** — what contracts the plugin implements
+- **hooks** — which host events trigger it
+- **permissions** — what it needs access to
+- **settings** — user-configurable options (rendered in the UI)
+- **actions** — manual buttons on the plugin page
+- **schema.tables** — database tables the host creates for you
+- **data_ownership** — files/directories the host manages on uninstall
+
+### 2. Implement the Plugin Class
+
+Edit `Plugin.php`. The class must implement all interfaces matching declared capabilities:
+
+```php
+// Every plugin
+public function runAction(string $action, array $payload, PluginExecutionContext $context): PluginActionResult;
+
+// If hooks declared in manifest
+public function runHook(string $hook, array $payload, PluginExecutionContext $context): PluginActionResult;
+
+// If 'scheduled' capability declared
+public function scheduledActions(CarbonInterface $now, array $settings): array;
+
+// If lifecycle cleanup needed
+public function uninstall(PluginUninstallContext $context): void;
+```
+
+### 3. Use the Execution Context
+
+The `$context` parameter is your interface to the host:
+
+```php
+$context->info('Processing channels...');           // log to run history
+$context->heartbeat('Batch 3/10', progress: 30);    // update progress bar
+$context->checkpoint(50, 'Halfway', log: true);      // progress + log + state
+$context->settings;                                  // user's saved settings
+$context->dryRun;                                    // true = preview only
+$context->cancellationRequested();                   // check in loops
+```
+
+### 4. Return Results
+
+```php
+return PluginActionResult::success('Done.', ['count' => 42]);
+return PluginActionResult::failure('No data found.');
+return PluginActionResult::cancelled('User stopped the job.');
+```
+
+### 5. Test the Plugin
+
+After implementing, the plugin needs to be:
+1. Discovered — `php artisan plugins:discover` or "Discover Plugins" in UI
+2. Validated — the host checks the manifest matches the class
+3. Trusted — admin approves the plugin
+4. Enabled — turned on from the plugin page
+
+Test by running actions from the plugin's page in the UI.
+
+## Available Hooks
+
+| Hook | Fires When |
+|------|-----------|
+| `playlist.synced` | Playlist finishes importing/syncing |
+| `epg.synced` | EPG data finishes syncing |
+| `epg.cache.generated` | EPG cache XML files are rebuilt |
+| `before.epg.map` / `after.epg.map` | Before/after EPG mapping |
+| `before.epg.output.generate` / `after.epg.output.generate` | Before/after EPG output |
+
+## Available Capabilities
+
+| Capability | Interface | Purpose |
+|-----------|-----------|---------|
+| `channel_processor` | `ChannelProcessorPluginInterface` | Process/transform channels |
+| `epg_processor` | `EpgProcessorPluginInterface` | Process/transform EPG data |
+| `stream_analysis` | `StreamAnalysisPluginInterface` | Analyze stream health |
+| `scheduled` | `ScheduledPluginInterface` | Run on a cron schedule |
+
+## Settings Field Types
+
+| Type | Description | Extra Fields |
+|------|------------|-------------|
+| `boolean` | Toggle switch | — |
+| `number` | Numeric input | — |
+| `text` | Single-line text | — |
+| `textarea` | Multi-line text | — |
+| `select` | Dropdown | `options: [{value, label}]` |
+| `model_select` | Eloquent model picker | `model`, `label_attribute`, `scope` |
+
+## Key m3u-editor Models
+
+When you need to query the database:
+
+```php
+use App\Models\Channel;     // channels with title, name, group, playlist_id
+use App\Models\Playlist;    // M3U playlists (providers)
+use App\Models\Epg;         // EPG sources
+use App\Models\EpgMap;      // channel-to-EPG mappings
+use App\Models\MergedPlaylist;  // merged/output playlists
+```
+
+## Common Patterns
+
+### Batch Processing with Progress
+
+```php
+$channels = Channel::where('enabled', true)->get();
+$total = $channels->count();
+
+foreach ($channels->chunk(100) as $i => $batch) {
+    if ($context->cancellationRequested()) {
+        return PluginActionResult::cancelled("Stopped at batch {$i}.");
+    }
+
+    // process batch...
+
+    $context->checkpoint(
+        progress: (int) (($i + 1) / ceil($total / 100) * 100),
+        message: "Processed batch " . ($i + 1),
+        log: true,
+    );
+}
+```
+
+### Dry Run Guard
+
+```php
+if ($context->dryRun) {
+    return PluginActionResult::success("Would update {$count} channels.", compact('count'));
+}
+
+// actually write changes...
+```
+
+## References
+
+- `plugin.json` — this plugin's manifest
+- `Plugin.php` — this plugin's entrypoint
+- `CLAUDE.md` — full API reference
+- `AGENTS.md` — architecture rules and permissions
+- `docs/plugin-dev.md` in m3u-editor — comprehensive plugin system docs

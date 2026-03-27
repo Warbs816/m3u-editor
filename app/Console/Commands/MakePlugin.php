@@ -299,6 +299,7 @@ class MakePlugin extends Command
             'README.md' => 'stubs/plugins/README.stub',
             'AGENTS.md' => 'stubs/plugins/AGENTS.stub',
             'CLAUDE.md' => 'stubs/plugins/CLAUDE.stub',
+            '.claude/skills/plugin-dev/SKILL.md' => 'stubs/plugins/plugin-dev-skill.stub',
             '.github/workflows/plugin-ci.yml' => 'stubs/plugins/plugin-ci.stub',
             'scripts/package-plugin.sh' => 'stubs/plugins/package-plugin.stub',
             'scripts/validate-plugin.php' => 'stubs/plugins/validate-plugin.stub',
