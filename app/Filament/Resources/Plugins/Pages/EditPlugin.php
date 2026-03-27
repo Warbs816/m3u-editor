@@ -9,7 +9,6 @@ use App\Plugins\PluginManager;
 use App\Plugins\PluginSchemaMapper;
 use Filament\Actions\Action;
 use Filament\Actions\ActionGroup;
-use Filament\Actions\DeleteAction;
 use Filament\Forms\Components\Select;
 use Filament\Notifications\Notification;
 use Filament\Resources\Pages\EditRecord;
@@ -288,13 +287,6 @@ class EditPlugin extends EditRecord
                                 ->send();
                         }
                     }),
-
-                DeleteAction::make()
-                    ->label('Delete Record')
-                    ->visible(fn () => $canManagePlugins)
-                    ->disabled(fn () => $this->record->hasActiveRuns())
-                    ->modalDescription('Removes this plugin from the registry along with its saved settings and run history. The local plugin files stay on disk — if the folder still exists, discovery will re-register it on the next scan.')
-                    ->successRedirectUrl(PluginResource::getUrl()),
 
                 Action::make('delete_from_disk')
                     ->label('Delete Plugin')

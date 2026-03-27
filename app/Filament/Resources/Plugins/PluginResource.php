@@ -11,13 +11,16 @@ use App\Models\Epg;
 use App\Models\Playlist;
 use App\Models\Plugin;
 use App\Models\PluginRun;
+use App\Plugins\PluginManager;
 use App\Plugins\PluginSchemaMapper;
 use App\Services\DateFormatService;
 use Filament\Actions\Action;
 use Filament\Actions\EditAction;
 use Filament\Forms\Components\Placeholder;
+use Filament\Forms\Components\Select;
 use Filament\Forms\Components\Textarea;
 use Filament\Forms\Components\TextInput;
+use Filament\Notifications\Notification;
 use Filament\Resources\Resource;
 use Filament\Schemas\Components\Grid;
 use Filament\Schemas\Components\Section;
@@ -249,6 +252,51 @@ class PluginResource extends Resource
                     ->modalSubmitActionLabel(fn (Plugin $record) => $record->enabled ? 'Disable' : 'Enable')
                     ->modalWidth('sm')
                     ->action(fn (Plugin $record) => $record->update(['enabled' => ! $record->enabled])),
+                Action::make('delete')
+                    ->button()
+                    ->size('sm')
+                    ->hiddenLabel()
+                    ->tooltip('Delete plugin')
+                    ->label('Delete')
+                    ->color('danger')
+                    ->icon('heroicon-o-trash')
+                    ->visible(fn (Plugin $record) => (auth()->user()?->canManagePlugins() ?? false) && ! $record->isBundled())
+                    ->disabled(fn (Plugin $record) => $record->hasActiveRuns())
+                    ->requiresConfirmation()
+                    ->modalHeading(fn (Plugin $record) => "Delete {$record->name}?")
+                    ->modalDescription('Permanently removes the plugin files from the server and deletes its registry record, settings, and run history. This cannot be undone.')
+                    ->modalSubmitActionLabel('Delete permanently')
+                    ->schema([
+                        Select::make('cleanup_mode')
+                            ->label('What to do with plugin data')
+                            ->options([
+                                'preserve' => 'Keep database tables and files created by the plugin',
+                                'purge' => 'Delete database tables and files created by the plugin',
+                            ])
+                            ->default(fn (Plugin $record) => $record->defaultCleanupMode())
+                            ->required(),
+                    ])
+                    ->action(function (array $data, Plugin $record): void {
+                        try {
+                            app(PluginManager::class)->deleteFromDisk(
+                                $record,
+                                $data['cleanup_mode'] ?? 'preserve',
+                                auth()->id(),
+                            );
+
+                            Notification::make()
+                                ->success()
+                                ->title('Plugin deleted')
+                                ->body('The plugin files have been removed from disk and its registry record has been deleted.')
+                                ->send();
+                        } catch (\RuntimeException $exception) {
+                            Notification::make()
+                                ->danger()
+                                ->title('Delete blocked')
+                                ->body($exception->getMessage())
+                                ->send();
+                        }
+                    }),
             ], RecordActionsPosition::BeforeCells);
     }
 
