@@ -34,7 +34,7 @@
       "label": "DVR Host",
       "type": "text",
       "required": true,
-      "helper_text": "IP address or hostname of your Channels DVR server (e.g. 192.168.11.22). Do not include the port or a trailing slash.",
+      "helper_text": "IP address or hostname of your Channels DVR server, without the port (e.g. 192.168.11.22 or my-dvr.local). Set the port separately below.",
       "default": ""
     },
     {

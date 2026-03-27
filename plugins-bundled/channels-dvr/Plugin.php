@@ -206,6 +206,10 @@ class Plugin implements ChannelProcessorPluginInterface, HookablePluginInterface
 
     /**
      * Build the base URL from settings (no trailing slash, port appended).
+     *
+     * Strips any port already embedded in the host value so that the Port
+     * setting is always the authoritative source — prevents double-port URLs
+     * if the user includes the port in the DVR Host field (e.g. "192.168.1.1:8089").
      */
     private function buildBaseUrl(array $settings): string
     {
@@ -219,9 +223,18 @@ class Plugin implements ChannelProcessorPluginInterface, HookablePluginInterface
             $host = 'http://'.$host;
         }
 
+        // Strip any port already in the host so the Port setting wins.
+        $parsed = parse_url($host);
+        $scheme = $parsed['scheme'] ?? 'http';
+        $hostname = $parsed['host'] ?? '';
+
+        if ($hostname === '') {
+            return '';
+        }
+
         $port = (int) ($settings['dvr_port'] ?? 8089);
 
-        return rtrim($host, '/').":{$port}";
+        return "{$scheme}://{$hostname}:{$port}";
     }
 
     /**
