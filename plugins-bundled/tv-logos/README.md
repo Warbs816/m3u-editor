@@ -47,7 +47,7 @@ Automatically enriches channel logos from the open-source [tv-logo/tv-logos](htt
 
 ## Private installs
 
-Private plugins do not need GitHub. Operators can stage the local plugin directory directly:
+Private plugins do not need GitHub. Admins can stage the local plugin directory directly:
 
 ```bash
 php artisan plugins:stage-directory /absolute/path/to/tv-logos

@@ -110,9 +110,9 @@ class PluginResource extends Resource
                                             Placeholder::make('actions_display')
                                                 ->hiddenLabel()
                                                 ->content(fn (?Plugin $record): HtmlString => new HtmlString(self::infoCard(
-                                                    'Operator Actions',
+                                                    'Available Actions',
                                                     'Manual actions available from the page header.',
-                                                    self::operatorActions($record),
+                                                    self::availableActions($record),
                                                 ))),
                                         ]),
                                     Grid::make(2)
@@ -131,7 +131,7 @@ class PluginResource extends Resource
                                                 ->hiddenLabel()
                                                 ->content(fn (?Plugin $record): HtmlString => new HtmlString(self::infoCard(
                                                     'Plugin Contract',
-                                                    'Version, implementation source, and what operators should expect.',
+                                                    'Version, implementation source, and what to expect from this plugin.',
                                                     self::pluginIdentity($record),
                                                 ))),
                                         ]),
@@ -326,7 +326,7 @@ class PluginResource extends Resource
                         </div>
                     </div>
                     <div class="rounded-[1.5rem] border border-white/60 bg-white/80 p-5 shadow-sm backdrop-blur dark:border-gray-800 dark:bg-gray-900/85">
-                        <div class="text-[11px] font-semibold uppercase tracking-[0.18em] text-gray-500 dark:text-gray-400">Operator posture</div>
+                        <div class="text-[11px] font-semibold uppercase tracking-[0.18em] text-gray-500 dark:text-gray-400">Trust & Security</div>
                         <div class="mt-3 text-sm leading-6 text-gray-700 dark:text-gray-200">'.e($summary).'</div>
                         <div class="mt-5 space-y-3">
                             '.self::stackedStat('Last validation', app(DateFormatService::class)->format($record->last_validated_at, 'Not validated yet')).'
@@ -336,7 +336,6 @@ class PluginResource extends Resource
                         </div>
                         <div class="mt-5 flex flex-wrap gap-2">
                             '.$runLink.'
-                            <span class="inline-flex items-center rounded-full border border-gray-200 bg-gray-50 px-3 py-1.5 text-xs font-medium text-gray-600 dark:border-gray-800 dark:bg-gray-950 dark:text-gray-300">Header actions queue work</span>
                         </div>
                     </div>
                 </div>
@@ -434,7 +433,7 @@ class PluginResource extends Resource
     protected static function nextStepCard(?Plugin $record): string
     {
         if (! $record) {
-            return self::infoCard('Recommended Next Step', 'What the operator should do next.', self::mutedMessage('No plugin record loaded.'));
+            return self::infoCard('Recommended Next Step', 'What to do next.', self::mutedMessage('No plugin record loaded.'));
         }
 
         $latestRun = self::latestRun($record);
@@ -471,7 +470,7 @@ class PluginResource extends Resource
             </div>
         ';
 
-        return self::infoCard('Recommended Next Step', 'A simple operator recommendation based on the current state.', $body);
+        return self::infoCard('Recommended Next Step', 'A recommendation based on the current plugin state.', $body);
     }
 
     protected static function pluginIdentity(?Plugin $record): string
@@ -490,7 +489,7 @@ class PluginResource extends Resource
         ]);
     }
 
-    protected static function operatorActions(?Plugin $record): string
+    protected static function availableActions(?Plugin $record): string
     {
         $actions = collect($record?->actions ?? [])
             ->map(function (array $action): string {
@@ -509,7 +508,7 @@ class PluginResource extends Resource
             ->implode('');
 
         if ($actions === '') {
-            return self::mutedMessage('No operator actions were declared for this plugin.');
+            return self::mutedMessage('No actions were declared for this plugin.');
         }
 
         return '<div class="grid gap-2">'.$actions.'</div>';

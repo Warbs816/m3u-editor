@@ -25,7 +25,7 @@
 
 ## Private installs
 
-Private plugins do not need GitHub. Operators can stage the local plugin directory directly:
+Private plugins do not need GitHub. Admins can stage the local plugin directory directly:
 
 ```bash
 php artisan plugins:stage-directory /absolute/path/to/{{ plugin_id }}
