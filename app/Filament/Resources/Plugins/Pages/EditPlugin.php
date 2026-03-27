@@ -287,10 +287,10 @@ class EditPlugin extends EditRecord
                         }
                     }),
                 DeleteAction::make()
-                    ->label('Forget Registry Record')
+                    ->label('Delete Plugin Record')
                     ->visible(fn () => $canManagePlugins)
                     ->disabled(fn () => $this->record->hasActiveRuns())
-                    ->modalDescription('This deletes the registry row, saved plugin settings, and recorded run history. It does not uninstall the local plugin files and does not clean plugin-owned data. Discovery will register the plugin again if its folder still exists.')
+                    ->modalDescription('Removes this plugin from the registry along with its saved settings and run history. The local plugin files stay on disk — if the folder still exists, discovery will re-register it on the next scan.')
                     ->successRedirectUrl(PluginResource::getUrl()),
             ])->label('Manage')->icon('heroicon-o-cog-6-tooth')->button(),
         ];
