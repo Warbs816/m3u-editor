@@ -27,7 +27,7 @@ class CreatePlugin extends Page
 
     protected static string|\UnitEnum|null $navigationGroup = 'Plugins';
 
-    protected static ?int $navigationSort = 3;
+    protected static ?int $navigationSort = 4;
 
     protected static string|\BackedEnum|null $navigationIcon = null;
 
@@ -159,7 +159,7 @@ class CreatePlugin extends Page
                             </x-filament::button>
                             <x-filament::button wire:click="downloadZip" color="gray" icon="heroicon-o-arrow-down-tray">
                                 Download as ZIP
-                            </button>
+                            </x-filament::button>
                         </div>
                     BLADE))),
             ])

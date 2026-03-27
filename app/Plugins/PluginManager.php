@@ -843,6 +843,28 @@ class PluginManager
         $plugin->delete();
     }
 
+    public function deleteFromDisk(Plugin $plugin, string $cleanupMode = 'preserve', ?int $userId = null): void
+    {
+        if ($plugin->isBundled()) {
+            throw new RuntimeException("Bundled plugin [{$plugin->plugin_id}] cannot be deleted from the UI. Remove it from the bundled plugins directory manually.");
+        }
+
+        if ($plugin->hasActiveRuns()) {
+            throw new RuntimeException("Plugin [{$plugin->plugin_id}] has active runs and cannot be deleted right now. Wait for them to finish or cancel them first.");
+        }
+
+        if ($plugin->isInstalled()) {
+            $this->uninstall($plugin, $cleanupMode, $userId);
+            $plugin = $plugin->fresh();
+        }
+
+        if ($plugin->path && is_dir((string) $plugin->path)) {
+            File::deleteDirectory((string) $plugin->path);
+        }
+
+        $plugin->delete();
+    }
+
     public function reinstall(Plugin $plugin): Plugin
     {
         $plugin->update([

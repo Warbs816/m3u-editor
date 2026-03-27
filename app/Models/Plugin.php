@@ -138,6 +138,11 @@ class Plugin extends Model
         return data_get($this->data_ownership ?? [], 'default_cleanup_policy', 'preserve');
     }
 
+    public function isBundled(): bool
+    {
+        return ($this->source_type ?? '') === 'bundled';
+    }
+
     public function hasActiveRuns(): bool
     {
         return $this->runs()

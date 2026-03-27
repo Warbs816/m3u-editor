@@ -246,7 +246,7 @@ class EditPlugin extends EditRecord
                 Action::make('uninstall')
                     ->label('Uninstall Plugin')
                     ->icon('heroicon-o-trash')
-                    ->color('danger')
+                    ->color('warning')
                     ->visible(fn () => $canManagePlugins)
                     ->hidden(fn () => ! $this->record->isInstalled())
                     ->requiresConfirmation()
@@ -288,12 +288,58 @@ class EditPlugin extends EditRecord
                                 ->send();
                         }
                     }),
+
                 DeleteAction::make()
-                    ->label('Delete Plugin Record')
+                    ->label('Delete Record')
                     ->visible(fn () => $canManagePlugins)
                     ->disabled(fn () => $this->record->hasActiveRuns())
                     ->modalDescription('Removes this plugin from the registry along with its saved settings and run history. The local plugin files stay on disk — if the folder still exists, discovery will re-register it on the next scan.')
                     ->successRedirectUrl(PluginResource::getUrl()),
+
+                Action::make('delete_from_disk')
+                    ->label('Delete Plugin')
+                    ->icon('heroicon-s-trash')
+                    ->color('danger')
+                    ->visible(fn () => $canManagePlugins && ! $this->record->isBundled())
+                    ->disabled(fn () => $this->record->hasActiveRuns())
+                    ->requiresConfirmation()
+                    ->modalHeading('Delete plugin from disk')
+                    ->modalDescription('Permanently removes the plugin files from the server and deletes its registry record, settings, and run history. This cannot be undone.')
+                    ->modalSubmitActionLabel('Delete permanently')
+                    ->schema([
+                        Select::make('cleanup_mode')
+                            ->label('What to do with plugin data')
+                            ->options([
+                                'preserve' => 'Keep database tables and files created by the plugin',
+                                'purge' => 'Delete database tables and files created by the plugin',
+                            ])
+                            ->default(fn () => $record->defaultCleanupMode())
+                            ->required()
+                            ->helperText('Choose whether to retain or remove any database tables and storage files the plugin created during its lifetime.'),
+                    ])
+                    ->action(function (array $data) use ($record): void {
+                        try {
+                            app(PluginManager::class)->deleteFromDisk(
+                                $record,
+                                $data['cleanup_mode'] ?? 'preserve',
+                                auth()->id(),
+                            );
+
+                            Notification::make()
+                                ->success()
+                                ->title('Plugin deleted')
+                                ->body('The plugin files have been removed from disk and its registry record has been deleted.')
+                                ->send();
+
+                            $this->redirect(PluginResource::getUrl());
+                        } catch (\RuntimeException $exception) {
+                            Notification::make()
+                                ->danger()
+                                ->title('Delete blocked')
+                                ->body($exception->getMessage())
+                                ->send();
+                        }
+                    }),
             ])->label('Manage')->icon('heroicon-o-cog-6-tooth')->button(),
         ];
     }
