@@ -8,6 +8,7 @@ use App\Filament\Resources\Groups\Pages\ListGroups;
 use App\Filament\Resources\Groups\RelationManagers\ChannelsRelationManager;
 use App\Jobs\GroupFindAndReplace;
 use App\Jobs\GroupFindAndReplaceReset;
+use App\Jobs\SyncPlexDvrJob;
 use App\Models\Channel;
 use App\Models\Group;
 use App\Models\Playlist;
@@ -291,6 +292,7 @@ class GroupResource extends Resource
 
                             SortFacade::bulkRecountGroupChannels($record, $maxChannel + 1);
                         })->after(function () {
+                            dispatch(new SyncPlexDvrJob(trigger: 'group_enable'));
                             Notification::make()
                                 ->success()
                                 ->title('Group channels enabled')
@@ -310,6 +312,7 @@ class GroupResource extends Resource
                                 'enabled' => false,
                             ]);
                         })->after(function () {
+                            dispatch(new SyncPlexDvrJob(trigger: 'group_disable'));
                             Notification::make()
                                 ->success()
                                 ->title('Group channels disabled')
@@ -408,6 +411,7 @@ class GroupResource extends Resource
                                 SortFacade::bulkRecountGroupChannels($record, $maxChannel + 1);
                             }
                         })->after(function () {
+                            dispatch(new SyncPlexDvrJob(trigger: 'group_bulk_enable'));
                             Notification::make()
                                 ->success()
                                 ->title('Selected group channels enabled')
@@ -429,6 +433,7 @@ class GroupResource extends Resource
                                 ]);
                             }
                         })->after(function () {
+                            dispatch(new SyncPlexDvrJob(trigger: 'group_bulk_disable'));
                             Notification::make()
                                 ->success()
                                 ->title('Selected group channels disabled')
@@ -450,6 +455,7 @@ class GroupResource extends Resource
                                 ]);
                             }
                         })->after(function () {
+                            dispatch(new SyncPlexDvrJob(trigger: 'group_bulk_enable_groups'));
                             Notification::make()
                                 ->success()
                                 ->title('Selected groups enabled')
@@ -472,6 +478,7 @@ class GroupResource extends Resource
                                 ]);
                             }
                         })->after(function () {
+                            dispatch(new SyncPlexDvrJob(trigger: 'group_bulk_disable_groups'));
                             Notification::make()
                                 ->success()
                                 ->title('Selected groups disabled')

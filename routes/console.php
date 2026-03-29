@@ -24,11 +24,6 @@ Schedule::command('app:refresh-media-server-integrations')
     ->everyMinute()
     ->withoutOverlapping();
 
-// Sync Plex DVR channel maps with HDHR lineup
-Schedule::command('app:sync-plex-dvr')
-    ->everyFiveMinutes()
-    ->withoutOverlapping();
-
 // Refresh EPG
 Schedule::command('app:refresh-epg')
     ->everyMinute()
