@@ -99,6 +99,22 @@ class MediaServerIntegrationResource extends Resource
         return "{$scheme}://{$host}:{$port}";
     }
 
+    /**
+     * Resolve a playlist UUID to a human-readable name.
+     */
+    protected static function resolvePlaylistName(string $uuid): string
+    {
+        if (! $uuid) {
+            return '—';
+        }
+
+        $playlist = Playlist::where('uuid', $uuid)->first()
+            ?? CustomPlaylist::where('uuid', $uuid)->first()
+            ?? MergedPlaylist::where('uuid', $uuid)->first();
+
+        return $playlist ? $playlist->name : $uuid;
+    }
+
     public static function getRecordTitle(?Model $record): string|null|Htmlable
     {
         return $record?->name;
@@ -649,9 +665,36 @@ class MediaServerIntegrationResource extends Resource
                                         .'</div>'
                                     )),
 
+                                Placeholder::make('plex_dvr_tuners_list')
+                                    ->label('Registered Tuners')
+                                    ->content(function ($record) {
+                                        $tuners = $record->plex_dvr_tuners ?? [];
+                                        if (empty($tuners)) {
+                                            return new HtmlString('<span class="text-gray-400 text-sm">No tuners registered yet.</span>');
+                                        }
+                                        $rows = collect($tuners)->map(function (array $tuner) {
+                                            $uuid = $tuner['playlist_uuid'] ?? '—';
+                                            $key = $tuner['device_key'] ?? '—';
+                                            $name = self::resolvePlaylistName($uuid);
+
+                                            return '<tr>'
+                                                .'<td class="pr-4 py-1">'.\e($name).'</td>'
+                                                .'<td class="pr-4 py-1 text-xs font-mono text-gray-400">'.\e($key).'</td>'
+                                                .'</tr>';
+                                        })->implode('');
+
+                                        return new HtmlString(
+                                            '<table class="text-sm w-full">'
+                                            .'<thead><tr><th class="pr-4 text-left">Playlist</th><th class="pr-4 text-left">Device Key</th></tr></thead>'
+                                            .'<tbody>'.$rows.'</tbody>'
+                                            .'</table>'
+                                        );
+                                    })
+                                    ->visible(fn ($record) => $record && $record->isPlex() && ! empty($record->plex_dvr_tuners)),
+
                                 Actions::make([
-                                    Action::make('registerDvr')
-                                        ->label('Register DVR Tuner in Plex')
+                                    Action::make('addTuner')
+                                        ->label(fn ($record) => $record && $record->plex_dvr_id ? 'Add Tuner' : 'Register DVR Tuner in Plex')
                                         ->icon('heroicon-o-plus-circle')
                                         ->color('success')
                                         ->requiresConfirmation()
@@ -661,22 +704,28 @@ class MediaServerIntegrationResource extends Resource
                                             Select::make('playlist_uuid')
                                                 ->label('Playlist')
                                                 ->helperText('Select the playlist to use for HDHR/EPG endpoints.')
-                                                ->options(function () {
+                                                ->options(function ($record) {
                                                     $userId = Auth::id();
+                                                    $existingUuids = collect($record->plex_dvr_tuners ?? [])->pluck('playlist_uuid')->filter()->all();
                                                     $options = [];
                                                     foreach (Playlist::where('user_id', $userId)->get() as $p) {
-                                                        $options[$p->uuid] = "{$p->name} (Playlist)";
+                                                        if (! in_array($p->uuid, $existingUuids)) {
+                                                            $options[$p->uuid] = "{$p->name} (Playlist)";
+                                                        }
                                                     }
                                                     foreach (CustomPlaylist::where('user_id', $userId)->get() as $p) {
-                                                        $options[$p->uuid] = "{$p->name} (Custom)";
+                                                        if (! in_array($p->uuid, $existingUuids)) {
+                                                            $options[$p->uuid] = "{$p->name} (Custom)";
+                                                        }
                                                     }
                                                     foreach (MergedPlaylist::where('user_id', $userId)->get() as $p) {
-                                                        $options[$p->uuid] = "{$p->name} (Merged)";
+                                                        if (! in_array($p->uuid, $existingUuids)) {
+                                                            $options[$p->uuid] = "{$p->name} (Merged)";
+                                                        }
                                                     }
 
                                                     return $options;
                                                 })
-                                                ->default(fn ($record) => $record->playlist?->uuid)
                                                 ->searchable()
                                                 ->live()
                                                 ->afterStateUpdated(function (Set $set, ?string $state): void {
@@ -691,26 +740,10 @@ class MediaServerIntegrationResource extends Resource
                                             TextInput::make('hdhr_base_url')
                                                 ->label('HDHR Base URL')
                                                 ->helperText('This URL must be reachable from your Plex server. Use your machine\'s LAN IP, not localhost.')
-                                                ->default(function ($record) {
-                                                    $playlist = $record->playlist;
-                                                    if (! $playlist) {
-                                                        return '';
-                                                    }
-
-                                                    return self::buildHdhrBaseUrl()."/{$playlist->uuid}/hdhr";
-                                                })
                                                 ->required(),
                                             TextInput::make('epg_url')
                                                 ->label('EPG URL')
                                                 ->helperText('XMLTV EPG guide URL. Must also be reachable from Plex.')
-                                                ->default(function ($record) {
-                                                    $playlist = $record->playlist;
-                                                    if (! $playlist) {
-                                                        return '';
-                                                    }
-
-                                                    return self::buildHdhrBaseUrl()."/{$playlist->uuid}/epg.xml";
-                                                })
                                                 ->required(),
                                             TextInput::make('dvr_country')
                                                 ->label('Country Code')
@@ -732,22 +765,56 @@ class MediaServerIntegrationResource extends Resource
                                                 $data['epg_url'],
                                                 $data['dvr_country'],
                                                 $data['dvr_language'],
+                                                $data['playlist_uuid'],
                                             );
                                             if ($result['success']) {
-                                                Notification::make()->success()->title('DVR Registered')->body($result['message'])->persistent()->send();
+                                                Notification::make()->success()->title('Tuner Registered')->body($result['message'])->persistent()->send();
                                             } else {
                                                 Notification::make()->danger()->title('Registration Failed')->body($result['message'])->persistent()->send();
                                             }
                                         })
-                                        ->visible(fn ($record) => $record && $record->isPlex() && ! $record->plex_dvr_id),
+                                        ->visible(fn ($record) => $record && $record->isPlex()),
+
+                                    Action::make('removeTuner')
+                                        ->label('Remove Tuner')
+                                        ->icon('heroicon-o-minus-circle')
+                                        ->color('danger')
+                                        ->requiresConfirmation()
+                                        ->modalHeading('Remove Tuner')
+                                        ->modalDescription('Select a tuner to remove from the DVR. If it is the last tuner, the entire DVR will be removed.')
+                                        ->form([
+                                            Select::make('device_key')
+                                                ->label('Tuner')
+                                                ->options(function ($record) {
+                                                    $tuners = $record->plex_dvr_tuners ?? [];
+
+                                                    return collect($tuners)->mapWithKeys(function (array $t) {
+                                                        $key = $t['device_key'] ?? '';
+                                                        $name = self::resolvePlaylistName($t['playlist_uuid'] ?? '');
+
+                                                        return [$key => "{$name} ({$key})"];
+                                                    })->all();
+                                                })
+                                                ->required(),
+                                        ])
+                                        ->action(function ($record, array $data) {
+                                            $service = PlexManagementService::make($record);
+                                            $result = $service->removeTuner($data['device_key']);
+                                            if ($result['success']) {
+                                                Notification::make()->success()->title('Tuner Removed')->body($result['message'])->persistent()->send();
+                                            } else {
+                                                Notification::make()->danger()->title('Removal Failed')->body($result['message'])->persistent()->send();
+                                            }
+                                        })
+                                        ->visible(fn ($record) => $record && $record->isPlex() && ! empty($record->plex_dvr_tuners)),
 
                                     Action::make('removeDvr')
-                                        ->label('Remove DVR Tuner from Plex')
+                                        ->label('Remove Entire DVR')
                                         ->icon('heroicon-o-trash')
                                         ->color('danger')
                                         ->requiresConfirmation()
-                                        ->modalHeading('Remove DVR Tuner')
-                                        ->modalDescription('This will remove the HDHomeRun tuner from Plex. Live TV & DVR will no longer work for this playlist.')
+                                        ->modalHeading('Remove DVR')
+                                        ->modalDescription('This will remove the entire DVR and all tuners from Plex. Live TV & DVR will no longer work.')
                                         ->action(function ($record) {
                                             $service = PlexManagementService::make($record);
                                             $result = $service->removeDvr($record->plex_dvr_id);
@@ -801,6 +868,22 @@ class MediaServerIntegrationResource extends Resource
                                             }
                                         })
                                         ->visible(fn ($record) => $record && $record->isPlex() && $record->plex_dvr_id),
+
+                                    Action::make('forceSyncChannels')
+                                        ->label('Force Sync Channels')
+                                        ->icon('heroicon-o-arrow-path-rounded-square')
+                                        ->color('gray')
+                                        ->action(function ($record) {
+                                            $service = PlexManagementService::make($record);
+                                            $result = $service->syncDvrChannels();
+                                            if ($result['success']) {
+                                                $title = ($result['changed'] ?? false) ? 'Channels Synced' : 'Already In Sync';
+                                                Notification::make()->success()->title($title)->body($result['message'])->persistent()->send();
+                                            } else {
+                                                Notification::make()->danger()->title('Sync Failed')->body($result['message'])->persistent()->send();
+                                            }
+                                        })
+                                        ->visible(fn ($record) => $record && $record->isPlex() && ! empty($record->plex_dvr_tuners)),
                                 ])->fullWidth(),
 
                                 Placeholder::make('plex_dvr_channels')

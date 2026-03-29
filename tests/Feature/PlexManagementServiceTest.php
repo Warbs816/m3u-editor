@@ -218,17 +218,40 @@ it('can register a DVR device', function () {
             ]]]);
         }
 
+        // lineup.json for auto-sync after registration
+        if (str_contains($url, '/hdhr/lineup.json')) {
+            return Http::response([
+                ['GuideNumber' => '1', 'GuideName' => 'Channel 1', 'URL' => 'http://example.com/1'],
+            ]);
+        }
+
+        // lineupchannels for auto-sync
+        if (str_contains($url, '/livetv/epg/lineupchannels')) {
+            return Http::response(['MediaContainer' => ['Channel' => [
+                ['number' => '1', 'lineupIdentifier' => 'ch-1'],
+            ]]]);
+        }
+
+        // channelmap PUT for auto-sync
+        if (str_contains($url, '/channelmap')) {
+            return Http::response([], 200);
+        }
+
         return Http::response([], 404);
     });
 
     $service = PlexManagementService::make($this->integration);
-    $result = $service->addDvrDevice('http://m3u-editor/hdhr', 'http://m3u-editor/epg.xml');
+    $result = $service->addDvrDevice('http://m3u-editor/hdhr', 'http://m3u-editor/epg.xml', 'de', 'de', 'test-playlist-uuid');
 
     expect($result['success'])->toBeTrue();
     expect($result['dvr_id'])->toBe('42');
 
     $this->integration->refresh();
     expect($this->integration->plex_dvr_id)->toBe('42');
+    $tuners = $this->integration->plex_dvr_tuners;
+    expect($tuners)->toBeArray()->toHaveCount(1);
+    expect($tuners[0]['device_key'])->toBe('device-99');
+    expect($tuners[0]['playlist_uuid'])->toBe('test-playlist-uuid');
 });
 
 it('fails DVR registration when HDHR device is unreachable', function () {
@@ -244,7 +267,10 @@ it('fails DVR registration when HDHR device is unreachable', function () {
 });
 
 it('can remove a DVR', function () {
-    $this->integration->update(['plex_dvr_id' => '42']);
+    $this->integration->update([
+        'plex_dvr_id' => '42',
+        'plex_dvr_tuners' => [['device_key' => 'device-99', 'playlist_uuid' => 'test-uuid']],
+    ]);
 
     Http::fake([
         'plex.example.com:32400/livetv/dvrs/42' => Http::response([], 200),
@@ -256,6 +282,7 @@ it('can remove a DVR', function () {
     expect($result['success'])->toBeTrue();
     $this->integration->refresh();
     expect($this->integration->plex_dvr_id)->toBeNull();
+    expect($this->integration->plex_dvr_tuners)->toBeNull();
 });
 
 it('can get all libraries', function () {
@@ -387,9 +414,166 @@ it('stores plex management fields on model', function () {
     $this->integration->update([
         'plex_dvr_id' => 'dvr-42',
         'plex_machine_id' => 'machine-abc',
+        'plex_dvr_tuners' => [
+            ['device_key' => 'device-99', 'playlist_uuid' => 'playlist-uuid-abc'],
+        ],
     ]);
 
     $this->integration->refresh();
     expect($this->integration->plex_dvr_id)->toBe('dvr-42');
     expect($this->integration->plex_machine_id)->toBe('machine-abc');
+    expect($this->integration->plex_dvr_tuners)->toBeArray()->toHaveCount(1);
+    expect($this->integration->plex_dvr_tuners[0]['device_key'])->toBe('device-99');
+    expect($this->integration->plex_dvr_tuners[0]['playlist_uuid'])->toBe('playlist-uuid-abc');
+});
+
+it('can sync DVR channels when in sync', function () {
+    $this->integration->update([
+        'plex_dvr_id' => '42',
+        'plex_dvr_tuners' => [['device_key' => 'device-99', 'playlist_uuid' => 'test-uuid']],
+    ]);
+
+    Http::fake(function ($request) {
+        $url = $request->url();
+
+        if (str_contains($url, '/hdhr/lineup.json')) {
+            return Http::response([
+                ['GuideNumber' => '1', 'GuideName' => 'Ch 1', 'URL' => 'http://example.com/1'],
+                ['GuideNumber' => '2', 'GuideName' => 'Ch 2', 'URL' => 'http://example.com/2'],
+            ]);
+        }
+
+        if (str_contains($url, '/livetv/epg/lineupchannels')) {
+            return Http::response(['MediaContainer' => ['Channel' => [
+                ['number' => '1', 'lineupIdentifier' => 'ch-1'],
+                ['number' => '2', 'lineupIdentifier' => 'ch-2'],
+            ]]]);
+        }
+
+        if (str_contains($url, '/media/grabbers/devices') && ! str_contains($url, '?')) {
+            return Http::response(['MediaContainer' => ['Device' => [
+                [
+                    'key' => 'device-99',
+                    'uri' => 'http://m3u-editor/hdhr',
+                    'ChannelMapping' => [
+                        ['lineupIdentifier' => 'ch-1', 'enabled' => '1'],
+                        ['lineupIdentifier' => 'ch-2', 'enabled' => '1'],
+                    ],
+                ],
+            ]]]);
+        }
+
+        if (str_contains($url, '/livetv/dvrs') && ! str_contains($url, '?')) {
+            return Http::response(['MediaContainer' => ['Dvr' => [
+                ['key' => '42', 'Device' => [['key' => 'device-99']]],
+            ]]]);
+        }
+
+        return Http::response([], 200);
+    });
+
+    $service = PlexManagementService::make($this->integration);
+    $result = $service->syncDvrChannels();
+
+    expect($result['success'])->toBeTrue();
+    expect($result['changed'])->toBeFalse();
+    expect($result['mapped_channels'])->toBe(2);
+});
+
+it('can sync DVR channels when out of sync', function () {
+    $this->integration->update([
+        'plex_dvr_id' => '42',
+        'plex_dvr_tuners' => [['device_key' => 'device-99', 'playlist_uuid' => 'test-uuid']],
+    ]);
+
+    Http::fake(function ($request) {
+        $url = $request->url();
+
+        if (str_contains($url, '/hdhr/lineup.json')) {
+            return Http::response([
+                ['GuideNumber' => '1', 'GuideName' => 'Ch 1', 'URL' => 'http://example.com/1'],
+                ['GuideNumber' => '2', 'GuideName' => 'Ch 2', 'URL' => 'http://example.com/2'],
+                ['GuideNumber' => '3', 'GuideName' => 'Ch 3', 'URL' => 'http://example.com/3'],
+            ]);
+        }
+
+        if (str_contains($url, '/livetv/epg/lineupchannels')) {
+            return Http::response(['MediaContainer' => ['Channel' => [
+                ['number' => '1', 'lineupIdentifier' => 'ch-1'],
+                ['number' => '2', 'lineupIdentifier' => 'ch-2'],
+                ['number' => '3', 'lineupIdentifier' => 'ch-3'],
+            ]]]);
+        }
+
+        if (str_contains($url, '/media/grabbers/devices') && ! str_contains($url, '?')) {
+            return Http::response(['MediaContainer' => ['Device' => [
+                [
+                    'key' => 'device-99',
+                    'uri' => 'http://m3u-editor/hdhr',
+                    'ChannelMapping' => [
+                        ['lineupIdentifier' => 'ch-1', 'enabled' => '1'],
+                    ],
+                ],
+            ]]]);
+        }
+
+        if (str_contains($url, '/livetv/dvrs') && ! str_contains($url, '?')) {
+            return Http::response(['MediaContainer' => ['Dvr' => [
+                ['key' => '42', 'Device' => [['key' => 'device-99']]],
+            ]]]);
+        }
+
+        if (str_contains($url, '/channelmap')) {
+            return Http::response([], 200);
+        }
+
+        return Http::response([], 200);
+    });
+
+    $service = PlexManagementService::make($this->integration);
+    $result = $service->syncDvrChannels();
+
+    expect($result['success'])->toBeTrue();
+    expect($result['changed'])->toBeTrue();
+    expect($result['mapped_channels'])->toBe(3);
+});
+
+it('returns error when syncing without DVR configured', function () {
+    $service = PlexManagementService::make($this->integration);
+    $result = $service->syncDvrChannels();
+
+    expect($result['success'])->toBeFalse();
+    expect($result['message'])->toContain('not fully configured');
+});
+
+it('can run sync plex dvr command', function () {
+    $this->integration->update([
+        'plex_dvr_id' => '42',
+        'plex_dvr_tuners' => [['device_key' => 'device-99', 'playlist_uuid' => 'test-uuid']],
+    ]);
+
+    Http::fake(function ($request) {
+        $url = $request->url();
+
+        if (str_contains($url, '/hdhr/lineup.json')) {
+            return Http::response([]);
+        }
+
+        if (str_contains($url, '/livetv/epg/lineupchannels')) {
+            return Http::response(['MediaContainer' => ['Channel' => []]]);
+        }
+
+        if (str_contains($url, '/media/grabbers/devices') && ! str_contains($url, '?')) {
+            return Http::response(['MediaContainer' => ['Device' => []]]);
+        }
+
+        if (str_contains($url, '/livetv/dvrs')) {
+            return Http::response(['MediaContainer' => ['Dvr' => []]]);
+        }
+
+        return Http::response([], 200);
+    });
+
+    $this->artisan('app:sync-plex-dvr')
+        ->assertExitCode(0);
 });

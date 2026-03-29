@@ -73,6 +73,7 @@ class MediaServerIntegration extends Model
         'scan_recursive' => 'boolean',
         'auto_fetch_metadata' => 'boolean',
         'plex_management_enabled' => 'boolean',
+        'plex_dvr_tuners' => 'array',
     ];
 
     /**
