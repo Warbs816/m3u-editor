@@ -1,3 +1,4 @@
+<div>
 @php($results = $this->getResults())
 @php($hasMultiple = $this->hasMultipleUrls())
 
@@ -62,3 +63,4 @@
     @endif
 </div>
 @endif
+</div>
