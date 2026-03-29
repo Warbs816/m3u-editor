@@ -40,6 +40,7 @@ use Filament\Schemas\Components\Grid;
 use Filament\Schemas\Components\Section;
 use Filament\Schemas\Components\Tabs;
 use Filament\Schemas\Components\Tabs\Tab;
+use Filament\Schemas\Components\Utilities\Get;
 use Filament\Schemas\Components\Utilities\Set;
 use Filament\Schemas\Components\Wizard\Step;
 use Filament\Schemas\Schema;
@@ -737,6 +738,19 @@ class MediaServerIntegrationResource extends Resource
                                                     $set('epg_url', "{$baseUrl}/{$state}/epg.xml");
                                                 })
                                                 ->required(),
+                                            Placeholder::make('tvg_id_warning')
+                                                ->content(new HtmlString('<p style="color: #f59e0b; font-weight: 600;">⚠ This playlist\'s TVG ID output is not set to "Channel ID". For HDHR/Plex DVR to match EPG correctly, set the playlist\'s "Preferred TVG ID output" to "Channel ID (recommended for HDHR)".</p>'))
+                                                ->visible(function (Get $get): bool {
+                                                    $uuid = $get('playlist_uuid');
+                                                    if (! $uuid) {
+                                                        return false;
+                                                    }
+                                                    $playlist = Playlist::where('uuid', $uuid)->first()
+                                                        ?? CustomPlaylist::where('uuid', $uuid)->first()
+                                                        ?? MergedPlaylist::where('uuid', $uuid)->first();
+
+                                                    return $playlist && ($playlist->id_channel_by?->value ?? $playlist->id_channel_by ?? 'stream_id') !== 'channel_id';
+                                                }),
                                             TextInput::make('hdhr_base_url')
                                                 ->label('HDHR Base URL')
                                                 ->helperText('This URL must be reachable from your Plex server. Use your machine\'s LAN IP, not localhost.')
@@ -829,38 +843,17 @@ class MediaServerIntegrationResource extends Resource
                                     Action::make('refreshDvrGuide')
                                         ->label('Refresh EPG Guide')
                                         ->icon('heroicon-o-arrow-path')
-                                        ->form([
-                                            Select::make('epg_playlist_uuid')
-                                                ->label('Playlist')
-                                                ->helperText('Select the playlist whose EPG to use.')
-                                                ->options(function () {
-                                                    $userId = Auth::id();
-                                                    $options = [];
-                                                    foreach (Playlist::where('user_id', $userId)->get() as $p) {
-                                                        $options[$p->uuid] = "{$p->name} (Playlist)";
-                                                    }
-                                                    foreach (CustomPlaylist::where('user_id', $userId)->get() as $p) {
-                                                        $options[$p->uuid] = "{$p->name} (Custom)";
-                                                    }
-                                                    foreach (MergedPlaylist::where('user_id', $userId)->get() as $p) {
-                                                        $options[$p->uuid] = "{$p->name} (Merged)";
-                                                    }
-
-                                                    return $options;
-                                                })
-                                                ->default(fn ($record) => $record->playlist?->uuid)
-                                                ->searchable()
-                                                ->required(),
-                                        ])
-                                        ->action(function ($record, array $data) {
+                                        ->requiresConfirmation()
+                                        ->modalHeading('Refresh EPG Guide')
+                                        ->modalDescription('This will trigger Plex to re-fetch your EPG guide data and configure automatic refreshes.')
+                                        ->action(function ($record) {
                                             if (! $record->plex_dvr_id) {
                                                 Notification::make()->warning()->title('Not Configured')->body('Register a DVR tuner first.')->persistent()->send();
 
                                                 return;
                                             }
-                                            $epgUrl = self::buildHdhrBaseUrl()."/{$data['epg_playlist_uuid']}/epg.xml";
                                             $service = PlexManagementService::make($record);
-                                            $result = $service->configureGuide($record->plex_dvr_id, $epgUrl);
+                                            $result = $service->refreshGuides();
                                             if ($result['success']) {
                                                 Notification::make()->success()->title('Guide Refreshed')->body($result['message'])->persistent()->send();
                                             } else {

@@ -37,7 +37,6 @@ class PlexManagementService
     {
         return Http::baseUrl($this->baseUrl)
             ->timeout(30)
-            ->retry(2, 1000)
             ->withHeaders([
                 'X-Plex-Token' => $this->apiKey,
                 'Accept' => 'application/json',
@@ -496,24 +495,87 @@ class PlexManagementService
     }
 
     /**
-     * Configure XMLTV guide data for a DVR.
+     * Configure DVR preferences (EPG refresh settings, recording settings).
+     *
+     * Uses PUT /livetv/dvrs/{key}/prefs (Headendarr-compatible).
+     *
+     * @param  array<string, string>  $settings
      */
-    public function configureGuide(string $dvrId, string $epgUrl): array
+    public function configureDvrPrefs(string $dvrId, array $settings = []): array
     {
         try {
-            $lineupId = $this->buildLineupId($epgUrl);
-            $response = $this->client()->withBody('')->put("/livetv/dvrs/{$dvrId}?".http_build_query([
-                'lineup' => $lineupId,
-                'lineupTitle' => 'm3u-editor XMLTV Guide',
-            ]));
+            $defaults = [
+                'ButlerTaskRefreshEpgGuides' => 'true',
+                'xmltvCustomRefreshInHours' => '12',
+            ];
+            $prefs = array_merge($defaults, $settings);
+
+            $response = $this->client()
+                ->withBody('')
+                ->put("/livetv/dvrs/{$dvrId}/prefs?".http_build_query($prefs));
+
+            Log::debug('PlexManagementService: configureDvrPrefs response', [
+                'dvr_id' => $dvrId,
+                'status' => $response->status(),
+                'prefs' => array_keys($prefs),
+            ]);
 
             return [
                 'success' => $response->successful(),
                 'message' => $response->successful()
-                    ? 'Guide data configured'
-                    : 'Failed to configure guide: '.$response->status(),
+                    ? 'DVR preferences updated'
+                    : 'Failed to update DVR preferences: HTTP '.$response->status(),
             ];
         } catch (Exception $e) {
+            Log::error('PlexManagementService: configureDvrPrefs exception', [
+                'dvr_id' => $dvrId,
+                'error' => $e->getMessage(),
+            ]);
+
+            return ['success' => false, 'message' => $e->getMessage()];
+        }
+    }
+
+    /**
+     * Trigger Plex to refresh its EPG guides now.
+     *
+     * Also ensures auto-refresh is enabled in DVR prefs.
+     */
+    public function refreshGuides(): array
+    {
+        try {
+            $dvrId = $this->integration->plex_dvr_id;
+            if (! $dvrId) {
+                return ['success' => false, 'message' => 'No DVR registered. Register a tuner first.'];
+            }
+
+            // Enable auto-refresh in DVR prefs
+            $prefsResult = $this->configureDvrPrefs($dvrId, [
+                'ButlerTaskRefreshEpgGuides' => 'true',
+                'xmltvCustomRefreshInHours' => '12',
+            ]);
+
+            // Trigger a manual EPG guide refresh via Plex's butler
+            $refreshResponse = $this->client()->withBody('')->post('/butler/RefreshEPGGuides');
+
+            Log::debug('PlexManagementService: refreshGuides butler response', [
+                'status' => $refreshResponse->status(),
+                'prefs_result' => $prefsResult['success'],
+            ]);
+
+            if ($refreshResponse->successful()) {
+                return ['success' => true, 'message' => 'EPG guide refresh triggered. Plex will re-fetch the guide data.'];
+            }
+
+            // Butler endpoint may return non-200 on some Plex versions
+            if ($prefsResult['success']) {
+                return ['success' => true, 'message' => 'DVR auto-refresh configured. Butler returned HTTP '.$refreshResponse->status().', but prefs were saved. Plex will refresh guides automatically.'];
+            }
+
+            return ['success' => false, 'message' => 'Failed to refresh guides. Prefs: '.$prefsResult['message'].'. Butler: HTTP '.$refreshResponse->status()];
+        } catch (Exception $e) {
+            Log::error('PlexManagementService: refreshGuides exception', ['error' => $e->getMessage()]);
+
             return ['success' => false, 'message' => $e->getMessage()];
         }
     }
@@ -824,6 +886,17 @@ class PlexManagementService
             ? "{$totalMapped} channels synced across {$tunerCount} tuner(s)"
             : "{$totalMapped} channels in sync across {$tunerCount} tuner(s)";
 
+        // Trigger EPG refresh after channel sync so Plex re-fetches the guide
+        // and discovers lineup identifiers for newly added channels
+        if ($anyChanged) {
+            try {
+                $this->client()->withBody('')->post('/butler/RefreshEPGGuides');
+                $message .= ' — EPG refresh triggered';
+            } catch (Exception) {
+                // Non-critical: EPG will refresh on next scheduled cycle
+            }
+        }
+
         return [
             'success' => true,
             'message' => $message,
@@ -854,19 +927,29 @@ class PlexManagementService
                 return ['success' => false, 'message' => 'HDHR lineup response is not a valid array'];
             }
 
-            // Get EPG URL and build lineup ID
-            $epgUrl = $this->buildExternalUrl($playlistUuid, 'epg.xml');
-            $lineupId = $this->buildLineupId($epgUrl);
+            // Get the lineup ID directly from the Plex DVR data (most reliable)
+            $lineupId = $this->getDvrLineupId();
+
+            if (! $lineupId) {
+                // Fallback: rebuild from our known URL
+                $epgUrl = $this->buildExternalUrl($playlistUuid, 'epg.xml');
+                $lineupId = $this->buildLineupId($epgUrl);
+                Log::warning('PlexManagementService: Could not get lineup ID from DVR, using fallback', [
+                    'integration_id' => $this->integration->id,
+                    'fallback_lineup_id' => $lineupId,
+                ]);
+            }
 
             // Fetch Plex's current knowledge of the lineup channels
-            $lineupChannelsResponse = $this->client()->get('/livetv/epg/lineupchannels?'.http_build_query([
+            $lineupChannelsResponse = $this->client()->get('/livetv/epg/lineupchannels', [
                 'lineup' => $lineupId,
-            ]));
+            ]);
 
             if (! $lineupChannelsResponse->successful()) {
                 Log::warning('PlexManagementService: Failed to fetch lineup channels', [
                     'integration_id' => $this->integration->id,
                     'device_key' => $deviceKey,
+                    'lineup_id' => $lineupId,
                     'status' => $lineupChannelsResponse->status(),
                 ]);
 
@@ -875,6 +958,13 @@ class PlexManagementService
 
             // Build the channel map payload
             $lineupChannelsPayload = $lineupChannelsResponse->json('MediaContainer') ?? [];
+
+            Log::debug('PlexManagementService: Lineup channels response', [
+                'integration_id' => $this->integration->id,
+                'lineup_id' => $lineupId,
+                'media_container_keys' => array_keys($lineupChannelsPayload),
+                'channel_count' => is_array($lineupChannelsPayload['Channel'] ?? null) ? count($lineupChannelsPayload['Channel']) : 0,
+            ]);
             $channelMapPayload = $this->buildChannelMapPayload($hdhrLineup, $lineupChannelsPayload);
 
             if (empty($channelMapPayload['enabledIds'])) {
@@ -1015,6 +1105,100 @@ class PlexManagementService
     }
 
     /**
+     * Fetch the lineup ID from the Plex DVR data.
+     *
+     * This is more reliable than rebuilding it from scratch because Plex
+     * stores the exact lineup ID used during DVR creation.
+     */
+    protected function getDvrLineupId(): ?string
+    {
+        $dvrId = (string) ($this->integration->plex_dvr_id ?? '');
+        if (! $dvrId) {
+            return null;
+        }
+
+        try {
+            $response = $this->client()->get('/livetv/dvrs');
+            if (! $response->successful()) {
+                return null;
+            }
+
+            $selectedDvr = null;
+            foreach ($response->json('MediaContainer.Dvr', []) as $dvr) {
+                if ((string) ($dvr['key'] ?? '') === $dvrId) {
+                    $selectedDvr = $dvr;
+                    break;
+                }
+            }
+
+            if (! $selectedDvr) {
+                return null;
+            }
+
+            // Headendarr-style: check Lineup array entries first (more reliable)
+            $lineupEntries = $selectedDvr['Lineup'] ?? [];
+            if (! is_array($lineupEntries)) {
+                $lineupEntries = [$lineupEntries];
+            } elseif (! empty($lineupEntries) && ! array_is_list($lineupEntries)) {
+                // Single lineup entry returned as associative array
+                $lineupEntries = [$lineupEntries];
+            }
+
+            // First pass: match by title
+            foreach ($lineupEntries as $entry) {
+                if (! is_array($entry)) {
+                    continue;
+                }
+                $title = trim((string) ($entry['title'] ?? ''));
+                $id = trim((string) ($entry['id'] ?? ''));
+                if ($title && $id && stripos($title, 'xmltv') !== false) {
+                    Log::debug('PlexManagementService: Resolved lineup ID from Lineup array (by title)', [
+                        'integration_id' => $this->integration->id,
+                        'lineup_id' => $id,
+                        'title' => $title,
+                    ]);
+
+                    return $id;
+                }
+            }
+
+            // Second pass: match by lineup ID containing our EPG URL pattern
+            foreach ($lineupEntries as $entry) {
+                if (! is_array($entry)) {
+                    continue;
+                }
+                $id = trim((string) ($entry['id'] ?? ''));
+                if ($id && str_contains($id, 'tv.plex.providers.epg.xmltv')) {
+                    Log::debug('PlexManagementService: Resolved lineup ID from Lineup array (by provider)', [
+                        'integration_id' => $this->integration->id,
+                        'lineup_id' => $id,
+                    ]);
+
+                    return $id;
+                }
+            }
+
+            // Third: fall back to top-level lineup field
+            $topLevel = trim((string) ($selectedDvr['lineup'] ?? ''));
+            if ($topLevel) {
+                Log::debug('PlexManagementService: Resolved lineup ID from top-level field', [
+                    'integration_id' => $this->integration->id,
+                    'lineup_id' => $topLevel,
+                ]);
+
+                return $topLevel;
+            }
+        } catch (Exception $e) {
+            Log::warning('PlexManagementService: Failed to fetch DVR lineup ID', [
+                'integration_id' => $this->integration->id,
+                'error' => $e->getMessage(),
+            ]);
+        }
+
+        return null;
+    }
+
+    /**
      * Build the channel map payload for Plex from HDHR lineup and Plex lineup channels.
      *
      * @return array{payload: array, enabledIds: list<string>, unmatched: list<string>}
@@ -1023,8 +1207,15 @@ class PlexManagementService
     {
         // Build a number→identifier map from Plex's lineup channels.
         // Plex returns channels under "Channel" key with "number" and "lineupIdentifier" fields.
+        // Handle single-channel responses: Plex may return a single object instead of an array.
+        $channels = $lineupChannelsPayload['Channel'] ?? [];
+        if (is_array($channels) && ! empty($channels) && ! array_is_list($channels)) {
+            // Single channel returned as an associative array — wrap it in a list
+            $channels = [$channels];
+        }
+
         $numberMap = [];
-        foreach ($lineupChannelsPayload['Channel'] ?? [] as $channel) {
+        foreach ($channels as $channel) {
             if (! is_array($channel)) {
                 continue;
             }
@@ -1086,7 +1277,12 @@ class PlexManagementService
         $mappedIds = [];
         $seen = [];
 
-        foreach ($devicePayload['ChannelMapping'] ?? [] as $item) {
+        $items = $devicePayload['ChannelMapping'] ?? [];
+        if (is_array($items) && ! empty($items) && ! array_is_list($items)) {
+            $items = [$items];
+        }
+
+        foreach ($items as $item) {
             if (! is_array($item)) {
                 continue;
             }

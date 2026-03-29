@@ -211,6 +211,7 @@ it('can register a DVR device', function () {
                 [
                     'key' => '42',
                     'uuid' => 'dvr-uuid-new',
+                    'lineup' => 'lineup://tv.plex.providers.epg.xmltv/test-lineup',
                     'Device' => [
                         ['key' => 'device-99', 'uuid' => 'device-uuid-abc'],
                     ],
@@ -465,7 +466,9 @@ it('can sync DVR channels when in sync', function () {
 
         if (str_contains($url, '/livetv/dvrs') && ! str_contains($url, '?')) {
             return Http::response(['MediaContainer' => ['Dvr' => [
-                ['key' => '42', 'Device' => [['key' => 'device-99']]],
+                ['key' => '42', 'lineup' => 'lineup://tv.plex.providers.epg.xmltv/test-lineup', 'Lineup' => [
+                    ['id' => 'lineup://tv.plex.providers.epg.xmltv/test-lineup', 'title' => 'XMLTV Guide'],
+                ], 'Device' => [['key' => 'device-99']]],
             ]]]);
         }
 
@@ -519,7 +522,9 @@ it('can sync DVR channels when out of sync', function () {
 
         if (str_contains($url, '/livetv/dvrs') && ! str_contains($url, '?')) {
             return Http::response(['MediaContainer' => ['Dvr' => [
-                ['key' => '42', 'Device' => [['key' => 'device-99']]],
+                ['key' => '42', 'lineup' => 'lineup://tv.plex.providers.epg.xmltv/test-lineup', 'Lineup' => [
+                    ['id' => 'lineup://tv.plex.providers.epg.xmltv/test-lineup', 'title' => 'XMLTV Guide'],
+                ], 'Device' => [['key' => 'device-99']]],
             ]]]);
         }
 
@@ -544,6 +549,35 @@ it('returns error when syncing without DVR configured', function () {
 
     expect($result['success'])->toBeFalse();
     expect($result['message'])->toContain('not fully configured');
+});
+
+it('can refresh EPG guides', function () {
+    $this->integration->update([
+        'plex_dvr_id' => '42',
+    ]);
+
+    Http::fake([
+        'plex.example.com:32400/livetv/dvrs/42/prefs*' => Http::response([], 200),
+        'plex.example.com:32400/butler/RefreshEPGGuides' => Http::response([], 200),
+    ]);
+
+    $service = PlexManagementService::make($this->integration);
+    $result = $service->refreshGuides();
+
+    expect($result['success'])->toBeTrue();
+    expect($result['message'])->toContain('refresh');
+});
+
+it('can configure DVR preferences', function () {
+    Http::fake([
+        'plex.example.com:32400/livetv/dvrs/42/prefs*' => Http::response([], 200),
+    ]);
+
+    $service = PlexManagementService::make($this->integration);
+    $result = $service->configureDvrPrefs('42', ['xmltvCustomRefreshInHours' => '6']);
+
+    expect($result['success'])->toBeTrue();
+    expect($result['message'])->toBe('DVR preferences updated');
 });
 
 it('can run sync plex dvr command', function () {
@@ -576,4 +610,163 @@ it('can run sync plex dvr command', function () {
 
     $this->artisan('app:sync-plex-dvr')
         ->assertExitCode(0);
+});
+
+it('resolves lineup ID from Lineup array entries', function () {
+    $this->integration->update([
+        'plex_dvr_id' => '42',
+        'plex_dvr_tuners' => [['device_key' => 'device-99', 'playlist_uuid' => 'test-uuid']],
+    ]);
+
+    Http::fake(function ($request) {
+        $url = $request->url();
+
+        if (str_contains($url, '/hdhr/lineup.json')) {
+            return Http::response([
+                ['GuideNumber' => '5', 'GuideName' => 'Ch 5', 'URL' => 'http://example.com/5'],
+            ]);
+        }
+
+        if (str_contains($url, '/livetv/epg/lineupchannels')) {
+            // Return a channel using the lineup ID from Lineup array
+            return Http::response(['MediaContainer' => ['Channel' => [
+                ['number' => '5', 'lineupIdentifier' => 'ch-5-from-lineup-array'],
+            ]]]);
+        }
+
+        if (str_contains($url, '/media/grabbers/devices') && ! str_contains($url, '?')) {
+            return Http::response(['MediaContainer' => ['Device' => [
+                [
+                    'key' => 'device-99',
+                    'ChannelMapping' => [
+                        ['lineupIdentifier' => 'ch-5-from-lineup-array', 'enabled' => '1'],
+                    ],
+                ],
+            ]]]);
+        }
+
+        if (str_contains($url, '/livetv/dvrs') && ! str_contains($url, '?')) {
+            // DVR with Lineup array (not just top-level lineup field)
+            return Http::response(['MediaContainer' => ['Dvr' => [
+                [
+                    'key' => '42',
+                    'lineup' => 'lineup://wrong-top-level',
+                    'Lineup' => [
+                        ['id' => 'lineup://tv.plex.providers.epg.xmltv/correct-lineup', 'title' => 'XMLTV Guide from array'],
+                    ],
+                    'Device' => [['key' => 'device-99']],
+                ],
+            ]]]);
+        }
+
+        return Http::response([], 200);
+    });
+
+    $service = PlexManagementService::make($this->integration);
+    $result = $service->syncDvrChannels();
+
+    expect($result['success'])->toBeTrue();
+    expect($result['mapped_channels'])->toBe(1);
+});
+
+it('triggers EPG refresh after channel map changes', function () {
+    $this->integration->update([
+        'plex_dvr_id' => '42',
+        'plex_dvr_tuners' => [['device_key' => 'device-99', 'playlist_uuid' => 'test-uuid']],
+    ]);
+
+    $butlerCalled = false;
+    Http::fake(function ($request) use (&$butlerCalled) {
+        $url = $request->url();
+
+        if (str_contains($url, '/butler/RefreshEPGGuides')) {
+            $butlerCalled = true;
+
+            return Http::response([], 200);
+        }
+
+        if (str_contains($url, '/hdhr/lineup.json')) {
+            return Http::response([
+                ['GuideNumber' => '1', 'GuideName' => 'Ch 1', 'URL' => 'http://example.com/1'],
+            ]);
+        }
+
+        if (str_contains($url, '/livetv/epg/lineupchannels')) {
+            return Http::response(['MediaContainer' => ['Channel' => []]]);
+        }
+
+        if (str_contains($url, '/media/grabbers/devices') && ! str_contains($url, '?')) {
+            return Http::response(['MediaContainer' => ['Device' => [
+                ['key' => 'device-99', 'ChannelMapping' => []],
+            ]]]);
+        }
+
+        if (str_contains($url, '/livetv/dvrs') && ! str_contains($url, '?')) {
+            return Http::response(['MediaContainer' => ['Dvr' => [
+                ['key' => '42', 'lineup' => 'lineup://test', 'Device' => [['key' => 'device-99']]],
+            ]]]);
+        }
+
+        if (str_contains($url, '/channelmap')) {
+            return Http::response([], 200);
+        }
+
+        return Http::response([], 200);
+    });
+
+    $service = PlexManagementService::make($this->integration);
+    $result = $service->syncDvrChannels();
+
+    expect($result['success'])->toBeTrue();
+    expect($result['changed'])->toBeTrue();
+    expect($butlerCalled)->toBeTrue();
+    expect($result['message'])->toContain('EPG refresh triggered');
+});
+
+it('handles single channel response from Plex lineup', function () {
+    $this->integration->update([
+        'plex_dvr_id' => '42',
+        'plex_dvr_tuners' => [['device_key' => 'device-99', 'playlist_uuid' => 'test-uuid']],
+    ]);
+
+    Http::fake(function ($request) {
+        $url = $request->url();
+
+        if (str_contains($url, '/hdhr/lineup.json')) {
+            return Http::response([
+                ['GuideNumber' => '10', 'GuideName' => 'Ch 10', 'URL' => 'http://example.com/10'],
+            ]);
+        }
+
+        if (str_contains($url, '/livetv/epg/lineupchannels')) {
+            // Single channel returned as object (not array) — Plex does this for single results
+            return Http::response(['MediaContainer' => ['Channel' => [
+                'number' => '10', 'lineupIdentifier' => 'single-ch-10',
+            ]]]);
+        }
+
+        if (str_contains($url, '/media/grabbers/devices') && ! str_contains($url, '?')) {
+            return Http::response(['MediaContainer' => ['Device' => [
+                ['key' => 'device-99', 'ChannelMapping' => []],
+            ]]]);
+        }
+
+        if (str_contains($url, '/livetv/dvrs') && ! str_contains($url, '?')) {
+            return Http::response(['MediaContainer' => ['Dvr' => [
+                ['key' => '42', 'lineup' => 'lineup://test', 'Device' => [['key' => 'device-99']]],
+            ]]]);
+        }
+
+        if (str_contains($url, '/channelmap')) {
+            return Http::response([], 200);
+        }
+
+        return Http::response([], 200);
+    });
+
+    $service = PlexManagementService::make($this->integration);
+    $result = $service->syncDvrChannels();
+
+    expect($result['success'])->toBeTrue();
+    expect($result['mapped_channels'])->toBe(1);
 });
