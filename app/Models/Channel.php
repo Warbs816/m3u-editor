@@ -177,6 +177,14 @@ class Channel extends Model
             internal: true
         );
 
+        [$castUrl, $castFormat] = $this->getProxyUrl(
+            withFormat: true,
+            profileFormat: 'm3u8',
+            username: $username,
+            password: $password,
+            internal: false
+        );
+
         return [
             'id' => $this->id,
             'stream_id' => $this->id,
@@ -185,6 +193,8 @@ class Channel extends Model
             'title' => $this->name_custom ?? $this->name,
             'url' => $url,
             'format' => $format,
+            'cast_url' => $castUrl,
+            'cast_format' => $castFormat,
             'type' => 'channel',
         ];
     }

@@ -86,6 +86,9 @@ function multiStreamManager() {
 
             const playerId = 'floating-player-' + Date.now() + '-' + Math.random().toString(36).substr(2, 9);
 
+            const castUrl = channelData.cast_url || channelData.url || '';
+            const inferredCastFormat = castUrl.includes('.m3u8') ? 'm3u8' : (channelData.cast_format || channelData.format || 'ts');
+
             const player = {
                 id: playerId,
                 channelId: channelData.id || null,
@@ -94,6 +97,8 @@ function multiStreamManager() {
                 logo: channelData.logo || channelData.icon || '',
                 url: channelData.url || '',
                 format: channelData.format || 'ts',
+                cast_url: castUrl,
+                cast_format: inferredCastFormat,
                 content_type: channelData.content_type || '',
                 stream_id: channelData.stream_id || null,
                 playlist_id: channelData.playlist_id || null,
@@ -253,6 +258,8 @@ function multiStreamManager() {
                 logo: player.logo ?? '',
                 url: player.url ?? '',
                 format: player.format ?? 'ts',
+                cast_url: player.cast_url ?? player.url ?? '',
+                cast_format: player.cast_format ?? player.format ?? 'ts',
                 content_type: player.content_type ?? '',
                 stream_id: player.stream_id ?? '',
                 playlist_id: player.playlist_id ?? '',
