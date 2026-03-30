@@ -72,7 +72,23 @@
                             if ($store.cast.isCasting && $store.cast.currentStreamUrl === player.url) {
                                 $store.cast.stopCast();
                             } else {
-                                $store.cast.startCast(player.url, player.format, player.title, player.logo);
+                                const videoEl = document.getElementById(player.id + '-video');
+                                $store.cast.startCast(
+                                    player.url, player.format, player.title, player.logo,
+                                    () => {
+                                        // Stop local playback to free the proxy connection
+                                        if (videoEl && videoEl._streamPlayer) {
+                                            videoEl._streamPlayer.cleanup();
+                                        }
+                                    },
+                                    () => {
+                                        // Resume local playback when cast ends
+                                        if (videoEl && window.streamPlayer) {
+                                            const sp = window.streamPlayer();
+                                            sp.initPlayer(player.url, player.format, player.id + '-video');
+                                        }
+                                    }
+                                );
                             }
                         "
                         :class="{

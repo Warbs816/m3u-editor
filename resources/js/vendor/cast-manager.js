@@ -33,6 +33,7 @@ document.addEventListener('alpine:init', () => {
         currentStreamUrl: null,
         _session: null,
         _mediaSession: null,
+        _onStopCallback: null,
 
         init() {
             // If the Cast SDK was already ready before Alpine booted, init now
@@ -60,10 +61,7 @@ document.addEventListener('alpine:init', () => {
                         this.isAvailable = state !== cast.framework.CastState.NO_DEVICES_AVAILABLE;
 
                         if (state === cast.framework.CastState.NOT_CONNECTED) {
-                            this.isCasting = false;
-                            this.currentStreamUrl = null;
-                            this._session = null;
-                            this._mediaSession = null;
+                            this._handleCastEnded();
                         }
                     }
                 );
@@ -73,10 +71,7 @@ document.addEventListener('alpine:init', () => {
                     cast.framework.CastContextEventType.SESSION_STATE_CHANGED,
                     (event) => {
                         if (event.sessionState === cast.framework.SessionState.SESSION_ENDED) {
-                            this.isCasting = false;
-                            this.currentStreamUrl = null;
-                            this._session = null;
-                            this._mediaSession = null;
+                            this._handleCastEnded();
                         }
                     }
                 );
@@ -90,12 +85,14 @@ document.addEventListener('alpine:init', () => {
         /**
          * Open the Chrome device picker and cast a stream.
          *
-         * @param {string} url       Stream URL (may be relative)
-         * @param {string} format    Stream format: 'hls', 'm3u8', 'ts', 'mpegts'
-         * @param {string} title     Channel/stream title
-         * @param {string} logo      Channel logo URL (optional)
+         * @param {string}   url            Stream URL (may be relative)
+         * @param {string}   format         Stream format: 'hls', 'm3u8', 'ts', 'mpegts'
+         * @param {string}   title          Channel/stream title
+         * @param {string}   logo           Channel logo URL (optional)
+         * @param {Function} onBeforeCast   Called after session is acquired, before media loads — stop local player here
+         * @param {Function} onCastStopped  Called when the cast session ends — resume local player here
          */
-        async startCast(url, format, title, logo) {
+        async startCast(url, format, title, logo, onBeforeCast, onCastStopped) {
             if (!window.cast || !window.chrome?.cast) {
                 console.warn('[CastManager] Cast SDK not available');
                 return;
@@ -111,6 +108,15 @@ document.addEventListener('alpine:init', () => {
                 if (!this._session) {
                     console.warn('[CastManager] No cast session after request');
                     return;
+                }
+
+                // Store the resume callback so we can call it when cast ends
+                this._onStopCallback = typeof onCastStopped === 'function' ? onCastStopped : null;
+
+                // Stop the local player before loading media on Chromecast
+                // This frees the proxy connection so the Chromecast can use it
+                if (typeof onBeforeCast === 'function') {
+                    onBeforeCast();
                 }
 
                 // Build absolute URL so the Chromecast can reach the server
@@ -167,10 +173,30 @@ document.addEventListener('alpine:init', () => {
                 console.warn('[CastManager] Error stopping cast:', e);
             }
 
+            // _handleCastEnded will be called by the session state listener,
+            // but call it here too in case the event doesn't fire synchronously
+            this._handleCastEnded();
+        },
+
+        /**
+         * Internal handler when a cast session ends (from any cause).
+         * Resets state and invokes the resume callback if one was registered.
+         */
+        _handleCastEnded() {
+            const wasCasting = this.isCasting;
+            const callback = this._onStopCallback;
+
             this.isCasting = false;
             this.currentStreamUrl = null;
             this._session = null;
             this._mediaSession = null;
+            this._onStopCallback = null;
+
+            // Resume local playback if we were actually casting
+            if (wasCasting && typeof callback === 'function') {
+                console.log('[CastManager] Cast ended, resuming local playback');
+                callback();
+            }
         },
 
         /**
