@@ -38,6 +38,27 @@ class PlayerController extends Controller
             $channelLogo = '';
         }
 
+        $castUrl = (string) $request->query('cast_url', $streamUrl);
+
+        $castHasAllowedAbsoluteScheme = filter_var($castUrl, FILTER_VALIDATE_URL)
+            && in_array(parse_url($castUrl, PHP_URL_SCHEME), ['http', 'https'], true);
+        $castHasAllowedRelativePath = str_starts_with($castUrl, '/');
+
+        if ($castUrl === '' || (! $castHasAllowedAbsoluteScheme && ! $castHasAllowedRelativePath)) {
+            $castUrl = $streamUrl;
+        }
+
+        $castFormat = (string) $request->query('cast_format', '');
+        if ($castFormat === '' && str_contains($castUrl, '.m3u8')) {
+            $castFormat = 'm3u8';
+        }
+        if ($castFormat === '') {
+            $castFormat = $streamFormat;
+        }
+        if (! in_array($castFormat, ['ts', 'mpegts', 'hls', 'm3u8'], true)) {
+            $castFormat = $streamFormat;
+        }
+
         $contentType = (string) $request->query('content_type', '');
         if (! in_array($contentType, ['live', 'vod', 'episode'], true)) {
             $contentType = '';
@@ -51,6 +72,8 @@ class PlayerController extends Controller
         return view('player.popout', [
             'streamUrl' => $streamUrl,
             'streamFormat' => $streamFormat,
+            'castUrl' => $castUrl,
+            'castFormat' => $castFormat,
             'channelTitle' => (string) $request->query('title', 'Channel Player'),
             'channelLogo' => $channelLogo,
             'contentType' => $contentType,

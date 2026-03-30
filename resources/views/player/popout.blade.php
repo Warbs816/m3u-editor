@@ -41,6 +41,8 @@
             <video id="popout-player" class="h-full w-full" controls autoplay preload="metadata"
                 data-url="{{ $streamUrl }}"
                 data-format="{{ $streamFormat }}"
+                data-cast-url="{{ $castUrl }}"
+                data-cast-format="{{ $castFormat }}"
                 data-content-type="{{ $contentType }}"
                 data-stream-id="{{ $streamId }}"
                 data-playlist-id="{{ $playlistId }}"
@@ -168,6 +170,7 @@
             let castSession = null;
             let isCasting = false;
 
+            const videoElement = document.getElementById('popout-player');
             const container = document.getElementById('cast-button-container');
             const btn = document.getElementById('cast-button');
             const label = document.getElementById('cast-button-label');
@@ -175,7 +178,7 @@
             function getMimeType(format, url) {
                 const f = (format || '').toLowerCase();
                 if (f === 'hls' || f === 'm3u8' || (url && url.includes('.m3u8'))) {
-                    return 'application/x-mpegURL';
+                    return 'application/vnd.apple.mpegurl';
                 }
                 if (f === 'ts' || f === 'mpegts') {
                     return 'video/mp2t';
@@ -188,6 +191,47 @@
                     return url;
                 }
                 return window.location.origin + (url.startsWith('/') ? '' : '/') + url;
+            }
+
+            async function resolveCastUrl(url) {
+                try {
+                    const currentProtocol = window.location.protocol;
+                    const castUrl = new URL(url, window.location.origin);
+                    const isUnsafeMixedContentPrefetch = currentProtocol === 'https:'
+                        && castUrl.protocol === 'http:'
+                        && castUrl.origin !== window.location.origin;
+
+                    if (isUnsafeMixedContentPrefetch) {
+                        console.log('[PopoutCast] Skipping cast URL resolution for insecure cross-origin URL', {
+                            originalUrl: url,
+                        });
+
+                        return url;
+                    }
+
+                    const response = await fetch(url, {
+                        method: 'GET',
+                        redirect: 'follow',
+                        credentials: 'same-origin',
+                    });
+
+                    console.log('[PopoutCast] Resolved cast URL', {
+                        originalUrl: url,
+                        resolvedUrl: response.url,
+                        redirected: response.redirected,
+                        ok: response.ok,
+                        status: response.status,
+                    });
+
+                    return response.url || url;
+                } catch (e) {
+                    console.warn('[PopoutCast] Failed to resolve cast URL, using original', {
+                        originalUrl: url,
+                        error: e,
+                    });
+
+                    return url;
+                }
             }
 
             function updateButton() {
@@ -220,6 +264,11 @@
                 context.addEventListener(
                     cast.framework.CastContextEventType.CAST_STATE_CHANGED,
                     (event) => {
+                        console.log('[PopoutCast] CAST_STATE_CHANGED', {
+                            castState: event.castState,
+                            previousCastState: event.previousCastState,
+                        });
+
                         if (event.castState === cast.framework.CastState.NOT_CONNECTED) {
                             handleCastEnded();
                         }
@@ -229,6 +278,22 @@
                 context.addEventListener(
                     cast.framework.CastContextEventType.SESSION_STATE_CHANGED,
                     (event) => {
+                        console.log('[PopoutCast] SESSION_STATE_CHANGED', {
+                            sessionState: event.sessionState,
+                            previousSessionState: event.previousSessionState,
+                            errorCode: event.errorCode ?? null,
+                        });
+
+                        if (event.sessionState === cast.framework.SessionState.SESSION_STARTED
+                            || event.sessionState === cast.framework.SessionState.SESSION_RESUMED) {
+                            const session = context.getCurrentSession();
+
+                            console.log('[PopoutCast] Active session', {
+                                sessionId: session?.getSessionId?.() ?? null,
+                                receiverFriendlyName: session?.getCastDevice?.().friendlyName ?? null,
+                            });
+                        }
+
                         if (event.sessionState === cast.framework.SessionState.SESSION_ENDED) {
                             handleCastEnded();
                         }
@@ -267,12 +332,33 @@
                 // Stop local playback to free the proxy connection
                 stopLocalPlayer();
 
-                const url = toAbsoluteUrl(@json($streamUrl));
-                const format = @json($streamFormat);
-                const contentType = getMimeType(format, url);
+                const castUrl = videoElement.dataset.castUrl || @json($castUrl);
+                const castFormat = videoElement.dataset.castFormat || @json($castFormat);
+                const url = toAbsoluteUrl(castUrl);
+                const resolvedUrl = await resolveCastUrl(url);
+                const format = castFormat;
+                const contentType = getMimeType(format, resolvedUrl);
 
-                const mediaInfo = new chrome.cast.media.MediaInfo(url, contentType);
+                const mediaInfo = new chrome.cast.media.MediaInfo(resolvedUrl, contentType);
                 mediaInfo.streamType = chrome.cast.media.StreamType.LIVE;
+                mediaInfo.customData = {
+                    debug: {
+                        requestedUrl: resolvedUrl,
+                        originalUrl: castUrl,
+                        resolvedUrl,
+                        format,
+                    },
+                };
+
+                console.log('[PopoutCast] Preparing cast media', {
+                    castUrl,
+                    url,
+                    resolvedUrl,
+                    format,
+                    contentType,
+                    streamType: mediaInfo.streamType,
+                    title: @json($channelTitle),
+                });
 
                 const metadata = new chrome.cast.media.GenericMediaMetadata();
                 metadata.title = @json($channelTitle);
@@ -284,7 +370,25 @@
                 const loadRequest = new chrome.cast.media.LoadRequest(mediaInfo);
                 loadRequest.autoplay = true;
 
+                console.log('[PopoutCast] loadMedia request', {
+                    contentId: mediaInfo.contentId,
+                    contentType: mediaInfo.contentType,
+                    streamType: mediaInfo.streamType,
+                    autoplay: loadRequest.autoplay,
+                    metadata: mediaInfo.metadata,
+                    customData: mediaInfo.customData,
+                });
+
                 await castSession.loadMedia(loadRequest);
+
+                const mediaSession = castSession.getMediaSession();
+                console.log('[PopoutCast] loadMedia resolved', {
+                    hasMediaSession: Boolean(mediaSession),
+                    playerState: mediaSession?.playerState ?? null,
+                    idleReason: mediaSession?.idleReason ?? null,
+                    media: mediaSession?.media ?? null,
+                });
+
                 isCasting = true;
                 updateButton();
             }

@@ -94,6 +94,14 @@ class Episode extends Model
             internal: true
         );
 
+        [$castUrl, $castFormat] = $this->getProxyUrl(
+            withFormat: true,
+            profileFormat: 'm3u8',
+            username: $username,
+            password: $password,
+            internal: false
+        );
+
         return [
             'id' => 'episode-'.$this->id,
             'stream_id' => $this->id,
@@ -104,6 +112,8 @@ class Episode extends Model
             'title' => $this->title,
             'url' => $url,
             'format' => $episodeFormat,
+            'cast_url' => $castUrl,
+            'cast_format' => $castFormat,
             'type' => 'episode',
         ];
     }

@@ -60,6 +60,12 @@ document.addEventListener('alpine:init', () => {
                         const state = event.castState;
                         this.isAvailable = state !== cast.framework.CastState.NO_DEVICES_AVAILABLE;
 
+                        console.log('[CastManager] CAST_STATE_CHANGED', {
+                            castState: state,
+                            previousCastState: event.previousCastState,
+                            isAvailable: this.isAvailable,
+                        });
+
                         if (state === cast.framework.CastState.NOT_CONNECTED) {
                             this._handleCastEnded();
                         }
@@ -70,6 +76,22 @@ document.addEventListener('alpine:init', () => {
                 context.addEventListener(
                     cast.framework.CastContextEventType.SESSION_STATE_CHANGED,
                     (event) => {
+                        console.log('[CastManager] SESSION_STATE_CHANGED', {
+                            sessionState: event.sessionState,
+                            previousSessionState: event.previousSessionState,
+                            errorCode: event.errorCode ?? null,
+                        });
+
+                        if (event.sessionState === cast.framework.SessionState.SESSION_STARTED
+                            || event.sessionState === cast.framework.SessionState.SESSION_RESUMED) {
+                            const session = context.getCurrentSession();
+
+                            console.log('[CastManager] Active session', {
+                                sessionId: session?.getSessionId?.() ?? null,
+                                receiverFriendlyName: session?.getCastDevice?.().friendlyName ?? null,
+                            });
+                        }
+
                         if (event.sessionState === cast.framework.SessionState.SESSION_ENDED) {
                             this._handleCastEnded();
                         }
@@ -121,14 +143,33 @@ document.addEventListener('alpine:init', () => {
 
                 // Build absolute URL so the Chromecast can reach the server
                 const absoluteUrl = this._toAbsoluteUrl(url);
+                const resolvedUrl = await this._resolveCastUrl(absoluteUrl);
 
                 // Determine MIME type
-                const contentType = this._getMimeType(format, url);
+                const contentType = this._getMimeType(format, resolvedUrl);
 
-                const mediaInfo = new chrome.cast.media.MediaInfo(absoluteUrl, contentType);
+                const mediaInfo = new chrome.cast.media.MediaInfo(resolvedUrl, contentType);
                 mediaInfo.streamType = this._isLiveFormat(format, url)
                     ? chrome.cast.media.StreamType.LIVE
                     : chrome.cast.media.StreamType.BUFFERED;
+                mediaInfo.customData = {
+                    debug: {
+                        requestedUrl: resolvedUrl,
+                        originalUrl: url,
+                        resolvedUrl,
+                        format,
+                    },
+                };
+
+                console.log('[CastManager] Preparing cast media', {
+                    originalUrl: url,
+                    absoluteUrl,
+                    resolvedUrl,
+                    format,
+                    contentType,
+                    streamType: mediaInfo.streamType,
+                    title: title || 'Stream',
+                });
 
                 // Set metadata (title + image)
                 const metadata = new chrome.cast.media.GenericMediaMetadata();
@@ -142,11 +183,27 @@ document.addEventListener('alpine:init', () => {
                 const loadRequest = new chrome.cast.media.LoadRequest(mediaInfo);
                 loadRequest.autoplay = true;
 
+                console.log('[CastManager] loadMedia request', {
+                    contentId: mediaInfo.contentId,
+                    contentType: mediaInfo.contentType,
+                    streamType: mediaInfo.streamType,
+                    autoplay: loadRequest.autoplay,
+                    metadata: mediaInfo.metadata,
+                    customData: mediaInfo.customData,
+                });
+
                 await this._session.loadMedia(loadRequest);
 
                 this.isCasting = true;
                 this.currentStreamUrl = url;
                 this._mediaSession = this._session.getMediaSession();
+
+                console.log('[CastManager] loadMedia resolved', {
+                    hasMediaSession: Boolean(this._mediaSession),
+                    playerState: this._mediaSession?.playerState ?? null,
+                    idleReason: this._mediaSession?.idleReason ?? null,
+                    media: this._mediaSession?.media ?? null,
+                });
 
                 console.log('[CastManager] Now casting:', title);
             } catch (e) {
@@ -212,13 +269,54 @@ document.addEventListener('alpine:init', () => {
             return window.location.origin + (url.startsWith('/') ? '' : '/') + url;
         },
 
+        async _resolveCastUrl(url) {
+            try {
+                const currentProtocol = window.location.protocol;
+                const castUrl = new URL(url, window.location.origin);
+                const isUnsafeMixedContentPrefetch = currentProtocol === 'https:'
+                    && castUrl.protocol === 'http:'
+                    && castUrl.origin !== window.location.origin;
+
+                if (isUnsafeMixedContentPrefetch) {
+                    console.log('[CastManager] Skipping cast URL resolution for insecure cross-origin URL', {
+                        originalUrl: url,
+                    });
+
+                    return url;
+                }
+
+                const response = await fetch(url, {
+                    method: 'GET',
+                    redirect: 'follow',
+                    credentials: 'same-origin',
+                });
+
+                console.log('[CastManager] Resolved cast URL', {
+                    originalUrl: url,
+                    resolvedUrl: response.url,
+                    redirected: response.redirected,
+                    ok: response.ok,
+                    status: response.status,
+                });
+
+                return response.url || url;
+            } catch (e) {
+                console.warn('[CastManager] Failed to resolve cast URL, using original', {
+                    originalUrl: url,
+                    error: e,
+                });
+
+                return url;
+            }
+        },
+
         /**
          * Determine the MIME type for a given stream format.
          */
         _getMimeType(format, url) {
             const f = (format || '').toLowerCase();
             if (f === 'hls' || f === 'm3u8' || (url && url.includes('.m3u8'))) {
-                return 'application/x-mpegURL';
+                return 'application/vnd.apple.mpegurl';
             }
             if (f === 'ts' || f === 'mpegts') {
                 return 'video/mp2t';
