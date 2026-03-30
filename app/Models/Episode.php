@@ -115,7 +115,7 @@ class Episode extends Model
     public function getProxyUrl(?bool $withFormat = false, ?string $profileFormat = null, ?string $username = null, ?string $password = null)
     {
         // Load the effective playlist to determine proxy settings and get UUID for authentication
-        $playlist = $this->getEffectivePlaylist();
+        $playlist = Playlist::find($this->playlist_id);
         $user = $this->user;
         $originalUrl = $this->url;
 
