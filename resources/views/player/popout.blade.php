@@ -221,9 +221,7 @@
                     cast.framework.CastContextEventType.CAST_STATE_CHANGED,
                     (event) => {
                         if (event.castState === cast.framework.CastState.NOT_CONNECTED) {
-                            isCasting = false;
-                            castSession = null;
-                            updateButton();
+                            handleCastEnded();
                         }
                     }
                 );
@@ -232,12 +230,29 @@
                     cast.framework.CastContextEventType.SESSION_STATE_CHANGED,
                     (event) => {
                         if (event.sessionState === cast.framework.SessionState.SESSION_ENDED) {
-                            isCasting = false;
-                            castSession = null;
-                            updateButton();
+                            handleCastEnded();
                         }
                     }
                 );
+            }
+
+            function stopLocalPlayer() {
+                const video = document.getElementById('popout-player');
+                if (video && video._streamPlayer) {
+                    video._streamPlayer.cleanup();
+                }
+            }
+
+            function resumeLocalPlayer() {
+                const video = document.getElementById('popout-player');
+                if (video && window.streamPlayer) {
+                    const sp = window.streamPlayer();
+                    sp.initPlayer(
+                        @json($streamUrl),
+                        @json($streamFormat),
+                        'popout-player'
+                    );
+                }
             }
 
             async function startCast() {
@@ -248,6 +263,9 @@
                 if (!castSession) {
                     return;
                 }
+
+                // Stop local playback to free the proxy connection
+                stopLocalPlayer();
 
                 const url = toAbsoluteUrl(@json($streamUrl));
                 const format = @json($streamFormat);
@@ -271,15 +289,25 @@
                 updateButton();
             }
 
+            function handleCastEnded() {
+                const wasCasting = isCasting;
+                isCasting = false;
+                castSession = null;
+                updateButton();
+
+                // Resume local playback when cast ends
+                if (wasCasting) {
+                    resumeLocalPlayer();
+                }
+            }
+
             function stopCast() {
                 const context = cast.framework.CastContext.getInstance();
                 const session = context.getCurrentSession();
                 if (session) {
                     session.endSession(true);
                 }
-                isCasting = false;
-                castSession = null;
-                updateButton();
+                handleCastEnded();
             }
 
             if (btn) {
