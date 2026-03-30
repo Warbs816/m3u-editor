@@ -7,6 +7,7 @@
     <meta name="csrf-token" content="{{ csrf_token() }}">
     <title>{{ $channelTitle }} - Player</title>
     @vite(['resources/css/app.css', 'resources/js/app.js'])
+    <script src="https://www.gstatic.com/cv/js/sender/v1/cast_sender.js?loadCastFramework=1"></script>
 </head>
 
 <body class="min-h-screen bg-black text-white">
@@ -21,6 +22,18 @@
                     <h1 class="truncate text-sm font-semibold sm:text-base">{{ $channelTitle }}</h1>
                     <p class="text-xs text-white/70">{{ strtoupper($streamFormat) }} Stream</p>
                 </div>
+            </div>
+            <div id="cast-button-container" style="display: none;">
+                <button
+                    id="cast-button"
+                    class="flex items-center gap-2 rounded bg-white/10 hover:bg-white/20 px-3 py-1.5 text-xs font-medium text-white transition-colors"
+                    title="Cast to Chromecast"
+                >
+                    <svg class="h-4 w-4" viewBox="0 0 24 24" fill="currentColor" xmlns="http://www.w3.org/2000/svg">
+                        <path d="M1 18v3h3c0-1.66-1.34-3-3-3zm0-4v2c2.76 0 5 2.24 5 5h2c0-3.87-3.13-7-7-7zm0-4v2c4.97 0 9 4.03 9 9h2c0-6.08-4.93-11-11-11zm20-7H3c-1.1 0-2 .9-2 2v3h2V5h18v14h-7v2h7c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2z"/>
+                    </svg>
+                    <span id="cast-button-label">Cast</span>
+                </button>
             </div>
         </header>
 
@@ -149,6 +162,158 @@
                 }
             });
         });
+
+        // Chromecast support for the popout player (no Alpine dependency)
+        (function() {
+            let castSession = null;
+            let isCasting = false;
+
+            const container = document.getElementById('cast-button-container');
+            const btn = document.getElementById('cast-button');
+            const label = document.getElementById('cast-button-label');
+
+            function getMimeType(format, url) {
+                const f = (format || '').toLowerCase();
+                if (f === 'hls' || f === 'm3u8' || (url && url.includes('.m3u8'))) {
+                    return 'application/x-mpegURL';
+                }
+                if (f === 'ts' || f === 'mpegts') {
+                    return 'video/mp2t';
+                }
+                return 'video/mp4';
+            }
+
+            function toAbsoluteUrl(url) {
+                if (!url || url.startsWith('http://') || url.startsWith('https://')) {
+                    return url;
+                }
+                return window.location.origin + (url.startsWith('/') ? '' : '/') + url;
+            }
+
+            function updateButton() {
+                if (isCasting) {
+                    btn.classList.remove('bg-white/10', 'hover:bg-white/20');
+                    btn.classList.add('bg-blue-600', 'hover:bg-blue-500');
+                    btn.title = 'Stop casting';
+                    label.textContent = 'Stop Cast';
+                } else {
+                    btn.classList.remove('bg-blue-600', 'hover:bg-blue-500');
+                    btn.classList.add('bg-white/10', 'hover:bg-white/20');
+                    btn.title = 'Cast to Chromecast';
+                    label.textContent = 'Cast';
+                }
+            }
+
+            function initCast() {
+                if (!window.cast || !window.cast.framework) {
+                    return;
+                }
+
+                const context = cast.framework.CastContext.getInstance();
+                context.setOptions({
+                    receiverApplicationId: chrome.cast.media.DEFAULT_MEDIA_RECEIVER_APP_ID,
+                    autoJoinPolicy: chrome.cast.AutoJoinPolicy.ORIGIN_SCOPED,
+                });
+
+                container.style.display = '';
+
+                context.addEventListener(
+                    cast.framework.CastContextEventType.CAST_STATE_CHANGED,
+                    (event) => {
+                        if (event.castState === cast.framework.CastState.NOT_CONNECTED) {
+                            isCasting = false;
+                            castSession = null;
+                            updateButton();
+                        }
+                    }
+                );
+
+                context.addEventListener(
+                    cast.framework.CastContextEventType.SESSION_STATE_CHANGED,
+                    (event) => {
+                        if (event.sessionState === cast.framework.SessionState.SESSION_ENDED) {
+                            isCasting = false;
+                            castSession = null;
+                            updateButton();
+                        }
+                    }
+                );
+            }
+
+            async function startCast() {
+                const context = cast.framework.CastContext.getInstance();
+                await context.requestSession();
+
+                castSession = context.getCurrentSession();
+                if (!castSession) {
+                    return;
+                }
+
+                const url = toAbsoluteUrl(@json($streamUrl));
+                const format = @json($streamFormat);
+                const contentType = getMimeType(format, url);
+
+                const mediaInfo = new chrome.cast.media.MediaInfo(url, contentType);
+                mediaInfo.streamType = chrome.cast.media.StreamType.LIVE;
+
+                const metadata = new chrome.cast.media.GenericMediaMetadata();
+                metadata.title = @json($channelTitle);
+                @if($channelLogo)
+                    metadata.images = [new chrome.cast.Image(toAbsoluteUrl(@json($channelLogo)))];
+                @endif
+                mediaInfo.metadata = metadata;
+
+                const loadRequest = new chrome.cast.media.LoadRequest(mediaInfo);
+                loadRequest.autoplay = true;
+
+                await castSession.loadMedia(loadRequest);
+                isCasting = true;
+                updateButton();
+            }
+
+            function stopCast() {
+                const context = cast.framework.CastContext.getInstance();
+                const session = context.getCurrentSession();
+                if (session) {
+                    session.endSession(true);
+                }
+                isCasting = false;
+                castSession = null;
+                updateButton();
+            }
+
+            if (btn) {
+                btn.addEventListener('click', async () => {
+                    try {
+                        if (isCasting) {
+                            stopCast();
+                        } else {
+                            await startCast();
+                        }
+                    } catch (e) {
+                        if (e.code !== 'cancel') {
+                            console.error('[CastPopout] Error:', e);
+                        }
+                    }
+                });
+            }
+
+            // Chain onto any existing callback (cast-manager.js may have set one)
+            const _prevCastCb = window['__onGCastApiAvailable'];
+            window['__onGCastApiAvailable'] = (isAvailable) => {
+                if (typeof _prevCastCb === 'function') {
+                    _prevCastCb(isAvailable);
+                }
+                if (isAvailable) {
+                    initCast();
+                }
+            };
+
+            // SDK may have loaded already
+            if (window.cast && window.cast.framework) {
+                initCast();
+            }
+        })();
     </script>
 </body>
 

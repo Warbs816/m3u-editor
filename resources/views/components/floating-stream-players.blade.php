@@ -64,6 +64,29 @@
                 </div>
                 
                 <div class="flex items-center space-x-1 flex-shrink-0">
+                    <!-- Cast to Chromecast Button -->
+                    <button
+                        x-show="$store.cast && $store.cast.isReady"
+                        x-cloak
+                        @click.stop="
+                            if ($store.cast.isCasting && $store.cast.currentStreamUrl === player.url) {
+                                $store.cast.stopCast();
+                            } else {
+                                $store.cast.startCast(player.url, player.format, player.title, player.logo);
+                            }
+                        "
+                        :class="{
+                            'text-blue-500 dark:text-blue-400': $store.cast.isCasting && $store.cast.currentStreamUrl === player.url,
+                            'text-gray-400 hover:text-blue-600 dark:hover:text-blue-400': !($store.cast.isCasting && $store.cast.currentStreamUrl === player.url)
+                        }"
+                        class="p-1 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded transition-colors focus:outline-none"
+                        :title="$store.cast.isCasting && $store.cast.currentStreamUrl === player.url ? 'Stop casting' : 'Cast to Chromecast'"
+                    >
+                        <svg class="w-3 h-3" viewBox="0 0 24 24" fill="currentColor" xmlns="http://www.w3.org/2000/svg">
+                            <path d="M1 18v3h3c0-1.66-1.34-3-3-3zm0-4v2c2.76 0 5 2.24 5 5h2c0-3.87-3.13-7-7-7zm0-4v2c4.97 0 9 4.03 9 9h2c0-6.08-4.93-11-11-11zm20-7H3c-1.1 0-2 .9-2 2v3h2V5h18v14h-7v2h7c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2z"/>
+                        </svg>
+                    </button>
+
                     <!-- Open in New Tab Button -->
                     <button
                         @click.stop="openInNewTab(player, '{{ route('player.popout') }}')"
