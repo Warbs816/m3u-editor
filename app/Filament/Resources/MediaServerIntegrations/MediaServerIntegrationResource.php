@@ -761,14 +761,14 @@ class MediaServerIntegrationResource extends Resource
                                                 ->required(),
                                             TextInput::make('dvr_country')
                                                 ->label('Country Code')
-                                                ->helperText('ISO country code for the DVR guide (e.g. de, us, gb).')
-                                                ->default('de')
+                                                ->helperText('ISO country code for the DVR guide (e.g. us, de, gb).')
+                                                ->default('us')
                                                 ->maxLength(5)
                                                 ->required(),
                                             TextInput::make('dvr_language')
                                                 ->label('Language Code')
-                                                ->helperText('ISO language code for the DVR guide (e.g. de, en, fr).')
-                                                ->default('de')
+                                                ->helperText('ISO language code for the DVR guide (e.g. en, de, fr).')
+                                                ->default('en')
                                                 ->maxLength(5)
                                                 ->required(),
                                         ])
