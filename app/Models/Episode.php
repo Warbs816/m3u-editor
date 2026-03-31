@@ -79,20 +79,16 @@ class Episode extends Model
     public function getFloatingPlayerAttributes(?string $username = null, ?string $password = null): array
     {
         $settings = app(GeneralSettings::class);
-
-        // For episodes, prefer the VOD default profile first
         $profileId = $settings->default_vod_stream_profile_id ?? null;
         $profile = $profileId ? StreamProfile::find($profileId) : null;
+        $url = URL::temporarySignedRoute('m3u-proxy.episode.player', now()->addHour(), ['id' => $this->id], absolute: false);
 
-        // Always proxy the internal player so we can attempt to transcode the stream for better compatibility
-        // Use internal (relative) URLs to prevent CORS and mixed-content issues
-        [$url, $episodeFormat] = $this->getProxyUrl(
-            withFormat: true,
-            profileFormat: $profile->format ?? null,
-            username: $username,
-            password: $password,
-            internal: true
-        );
+        $originalUrl = $this->url;
+        $format = pathinfo(parse_url($originalUrl, PHP_URL_PATH) ?? $originalUrl, PATHINFO_EXTENSION);
+
+        if (empty($format)) {
+            $format = $this->container_extension ?? 'ts';
+        }
 
         return [
             'id' => 'episode-'.$this->id,
@@ -103,7 +99,7 @@ class Episode extends Model
             'season_number' => $this->season,
             'title' => $this->title,
             'url' => $url,
-            'format' => $episodeFormat,
+            'format' => $profile->format ?? $format,
             'type' => 'episode',
         ];
     }

@@ -29,6 +29,14 @@ Route::middleware(['proxy.throttle'])->prefix('m3u-proxy')->group(function () {
         ->name('m3u-proxy.player-stream.stop')
         ->withoutMiddleware('proxy.throttle');
 
+    // In-app player preview routes
+    Route::get('channel/{id}/player/{uuid?}', [M3uProxyApiController::class, 'channelPlayer'])
+        ->name('m3u-proxy.channel.player')
+        ->middleware('signed:relative');
+    Route::get('episode/{id}/player/{uuid?}', [M3uProxyApiController::class, 'episodePlayer'])
+        ->name('m3u-proxy.episode.player')
+        ->middleware('signed:relative');
+
     // Main proxy routes
     Route::post('webhooks', [M3uProxyApiController::class, 'handleWebhook'])
         ->name('m3u-proxy.webhook');
