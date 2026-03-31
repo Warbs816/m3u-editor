@@ -94,13 +94,20 @@ class Episode extends Model
             internal: true
         );
 
-        [$castUrl, $castFormat] = $this->getProxyUrl(
-            withFormat: true,
-            profileFormat: 'm3u8',
-            username: $username,
-            password: $password,
-            internal: false
-        );
+        if ($username && $password) {
+            $castUsername = $username;
+            $castPassword = $password;
+        } else {
+            $castUsername = $this->user->name ?? 'admin';
+            $castPassword = $this->playlist?->uuid ?? 'missing-playlist';
+        }
+        $castUrl = route('cast.stream.series', [
+            'username' => $castUsername,
+            'password' => $castPassword,
+            'streamId' => $this->id,
+            'format' => 'm3u8',
+        ]);
+        $castFormat = 'm3u8';
 
         return [
             'id' => 'episode-'.$this->id,

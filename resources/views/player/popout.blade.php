@@ -193,47 +193,6 @@
                 return window.location.origin + (url.startsWith('/') ? '' : '/') + url;
             }
 
-            async function resolveCastUrl(url) {
-                try {
-                    const currentProtocol = window.location.protocol;
-                    const castUrl = new URL(url, window.location.origin);
-                    const isUnsafeMixedContentPrefetch = currentProtocol === 'https:'
-                        && castUrl.protocol === 'http:'
-                        && castUrl.origin !== window.location.origin;
-
-                    if (isUnsafeMixedContentPrefetch) {
-                        console.log('[PopoutCast] Skipping cast URL resolution for insecure cross-origin URL', {
-                            originalUrl: url,
-                        });
-
-                        return url;
-                    }
-
-                    const response = await fetch(url, {
-                        method: 'GET',
-                        redirect: 'follow',
-                        credentials: 'same-origin',
-                    });
-
-                    console.log('[PopoutCast] Resolved cast URL', {
-                        originalUrl: url,
-                        resolvedUrl: response.url,
-                        redirected: response.redirected,
-                        ok: response.ok,
-                        status: response.status,
-                    });
-
-                    return response.url || url;
-                } catch (e) {
-                    console.warn('[PopoutCast] Failed to resolve cast URL, using original', {
-                        originalUrl: url,
-                        error: e,
-                    });
-
-                    return url;
-                }
-            }
-
             function updateButton() {
                 if (isCasting) {
                     btn.classList.remove('bg-white/10', 'hover:bg-white/20');
@@ -335,7 +294,7 @@
                 const castUrl = videoElement.dataset.castUrl || @json($castUrl);
                 const castFormat = videoElement.dataset.castFormat || @json($castFormat);
                 const url = toAbsoluteUrl(castUrl);
-                const resolvedUrl = await resolveCastUrl(url);
+                const resolvedUrl = url;
                 const format = castFormat;
                 const contentType = getMimeType(format, resolvedUrl);
 

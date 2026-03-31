@@ -143,7 +143,7 @@ document.addEventListener('alpine:init', () => {
 
                 // Build absolute URL so the Chromecast can reach the server
                 const absoluteUrl = this._toAbsoluteUrl(url);
-                const resolvedUrl = await this._resolveCastUrl(absoluteUrl);
+                const resolvedUrl = absoluteUrl;
 
                 // Determine MIME type
                 const contentType = this._getMimeType(format, resolvedUrl);
@@ -267,47 +267,6 @@ document.addEventListener('alpine:init', () => {
                 return url;
             }
             return window.location.origin + (url.startsWith('/') ? '' : '/') + url;
-        },
-
-        async _resolveCastUrl(url) {
-            try {
-                const currentProtocol = window.location.protocol;
-                const castUrl = new URL(url, window.location.origin);
-                const isUnsafeMixedContentPrefetch = currentProtocol === 'https:'
-                    && castUrl.protocol === 'http:'
-                    && castUrl.origin !== window.location.origin;
-
-                if (isUnsafeMixedContentPrefetch) {
-                    console.log('[CastManager] Skipping cast URL resolution for insecure cross-origin URL', {
-                        originalUrl: url,
-                    });
-
-                    return url;
-                }
-
-                const response = await fetch(url, {
-                    method: 'GET',
-                    redirect: 'follow',
-                    credentials: 'same-origin',
-                });
-
-                console.log('[CastManager] Resolved cast URL', {
-                    originalUrl: url,
-                    resolvedUrl: response.url,
-                    redirected: response.redirected,
-                    ok: response.ok,
-                    status: response.status,
-                });
-
-                return response.url || url;
-            } catch (e) {
-                console.warn('[CastManager] Failed to resolve cast URL, using original', {
-                    originalUrl: url,
-                    error: e,
-                });
-
-                return url;
-            }
         },
 
         /**

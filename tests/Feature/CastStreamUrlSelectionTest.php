@@ -19,7 +19,22 @@ it('includes a dedicated hls cast url for floating channel players', function ()
 
     expect($attributes['url'])->toContain('/live/Harry/playlist-uuid/'.$channel->id.'.ts?proxy=true');
     expect($attributes['format'])->toBe('ts');
-    expect($attributes['cast_url'])->toContain('/live/Harry/playlist-uuid/'.$channel->id.'.m3u8?proxy=true');
+    expect($attributes['cast_url'])->toContain('/cast/live/Harry/playlist-uuid/'.$channel->id.'.m3u8');
+});
+
+it('falls back to a non-empty cast password when playlist context is missing', function () {
+    $user = User::factory()->create(['name' => 'Harry']);
+
+    $channel = Channel::factory()->for($user)->create([
+        'playlist_id' => null,
+        'custom_playlist_id' => null,
+        'url' => 'http://provider.test/live/stream.ts',
+        'is_vod' => false,
+    ]);
+
+    $attributes = $channel->getFloatingPlayerAttributes();
+
+    expect($attributes['cast_url'])->toContain('/cast/live/Harry/missing-playlist/'.$channel->id.'.m3u8');
     expect($attributes['cast_format'])->toBe('m3u8');
 });
 
@@ -36,6 +51,6 @@ it('includes a dedicated hls cast url for floating episode players', function ()
 
     expect($attributes['url'])->toContain('/series/Harry/playlist-uuid/'.$episode->id.'.ts?proxy=true');
     expect($attributes['format'])->toBe('ts');
-    expect($attributes['cast_url'])->toContain('/series/Harry/playlist-uuid/'.$episode->id.'.m3u8?proxy=true');
+    expect($attributes['cast_url'])->toContain('/cast/series/Harry/playlist-uuid/'.$episode->id.'.m3u8');
     expect($attributes['cast_format'])->toBe('m3u8');
 });
