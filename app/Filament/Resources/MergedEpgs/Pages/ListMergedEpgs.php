@@ -5,14 +5,17 @@ namespace App\Filament\Resources\MergedEpgs\Pages;
 use App\Filament\Resources\MergedEpgs\MergedEpgResource;
 use App\Jobs\ProcessEpgImport;
 use Filament\Actions\CreateAction;
+use Illuminate\Contracts\Support\Htmlable;
 use Filament\Resources\Pages\ListRecords;
 
 class ListMergedEpgs extends ListRecords
 {
     protected static string $resource = MergedEpgResource::class;
 
-    protected ?string $subheading = 'Combine multiple EPGs into one unified XML for external players.';
-
+    public function getSubheading(): string|\Illuminate\Contracts\Support\Htmlable|null
+    {
+        return __('Combine multiple EPGs into one unified XML for external players.');
+    }
     protected function getHeaderActions(): array
     {
         return [

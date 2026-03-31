@@ -31,7 +31,7 @@ class EditProfile extends \Filament\Auth\Pages\EditProfile
         // OIDC users authenticate via their IdP — hide password fields
         if (! $isOidcUser) {
             $fields[] = $this->getPasswordFormComponent()
-                ->helperText('Leave blank to keep the current password')
+                ->helperText(__('Leave blank to keep the current password'))
                 ->rules([
                     'min:8',
                     function () {

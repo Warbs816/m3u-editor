@@ -10,11 +10,17 @@ use Symfony\Component\HttpFoundation\StreamedResponse;
 
 class LogViewer extends Page
 {
-    protected static ?string $navigationLabel = 'Debug Logs';
+    public static function getNavigationLabel(): string
+    {
+        return __('Debug Logs');
+    }
 
     protected static ?string $title = 'Debug Logs';
 
-    protected static string|\UnitEnum|null $navigationGroup = 'Tools';
+    public static function getNavigationGroup(): ?string
+    {
+        return __('navigation.groups.tools');
+    }
 
     protected static ?int $navigationSort = 5;
 
@@ -225,19 +231,19 @@ class LogViewer extends Page
     {
         return [
             Action::make('download')
-                ->label('Download')
+                ->label(__('Download'))
                 ->icon('heroicon-o-arrow-down-tray')
                 ->color('gray')
                 ->action(fn () => $this->downloadLog()),
 
             Action::make('clear')
-                ->label('Clear log')
+                ->label(__('Clear log'))
                 ->icon('heroicon-o-trash')
                 ->color('danger')
                 ->requiresConfirmation()
-                ->modalHeading('Clear log file?')
-                ->modalDescription('This will permanently delete all entries in the selected log file. This cannot be undone.')
-                ->modalSubmitActionLabel('Clear')
+                ->modalHeading(__('Clear log file?'))
+                ->modalDescription(__('This will permanently delete all entries in the selected log file. This cannot be undone.'))
+                ->modalSubmitActionLabel(__('Clear'))
                 ->action(fn () => $this->clearLog()),
         ];
     }
@@ -268,7 +274,7 @@ class LogViewer extends Page
         $this->page = 1;
 
         Notification::make()
-            ->title('Log cleared')
+            ->title(__('Log cleared'))
             ->success()
             ->send();
     }

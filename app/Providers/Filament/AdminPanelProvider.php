@@ -16,7 +16,9 @@ use App\Filament\Widgets\SystemHealthWidget;
 use App\Filament\Widgets\UpdateNoticeWidget;
 use App\Http\Middleware\DashboardMiddleware;
 // use App\Filament\Widgets\PayPalDonateWidget;
+use App\Http\Middleware\SeedLocaleFromUser;
 use App\Settings\GeneralSettings;
+use CraftForge\FilamentLanguageSwitcher\FilamentLanguageSwitcherPlugin;
 use Exception;
 use Filament\Auth\MultiFactor\App\AppAuthentication;
 use Filament\Http\Middleware\Authenticate;
@@ -93,36 +95,36 @@ class AdminPanelProvider extends PanelProvider
                 CustomDashboard::class,
             ])
             ->navigationGroups([
-                NavigationGroup::make('Playlist')
+                NavigationGroup::make(fn () => __('navigation.groups.playlist'))
                     ->icon('heroicon-m-play-pause'),
-                NavigationGroup::make('Integrations')
+                NavigationGroup::make(fn () => __('navigation.groups.integrations'))
                     ->icon('heroicon-m-server-stack'),
-                NavigationGroup::make('Live Channels')
+                NavigationGroup::make(fn () => __('navigation.groups.live_channels'))
                     ->icon('heroicon-m-tv'),
-                NavigationGroup::make('VOD Channels')
+                NavigationGroup::make(fn () => __('navigation.groups.vod_channels'))
                     ->icon('heroicon-m-film'),
-                NavigationGroup::make('Series')
+                NavigationGroup::make(fn () => __('navigation.groups.series'))
                     ->icon('heroicon-m-play'),
-                NavigationGroup::make('EPG')
+                NavigationGroup::make(fn () => __('navigation.groups.epg'))
                     ->icon('heroicon-m-calendar-days'),
-                NavigationGroup::make('Proxy')
+                NavigationGroup::make(fn () => __('navigation.groups.proxy'))
                     ->icon('heroicon-m-arrows-right-left'),
-                NavigationGroup::make('Tools')
+                NavigationGroup::make(fn () => __('navigation.groups.tools'))
                     ->collapsed()
                     ->icon('heroicon-m-wrench-screwdriver'),
             ])
             ->navigationItems([
                 NavigationItem::make('API Docs')
-                    ->label('API Docs ↗')
+                    ->label(fn () => __('navigation.labels.api_docs').' ↗')
                     ->url('/docs/api', shouldOpenInNewTab: true)
-                    ->group('Tools')
+                    ->group(fn () => __('navigation.groups.tools'))
                     ->sort(sort: 9)
                     ->icon(null)
                     ->visible(fn (): bool => auth()->user()->isAdmin()),
                 NavigationItem::make('Queue Manager')
-                    ->label('Queue Manager ↗')
+                    ->label(fn () => __('navigation.labels.queue_manager').' ↗')
                     ->url('/horizon', shouldOpenInNewTab: true)
-                    ->group('Tools')
+                    ->group(fn () => __('navigation.groups.tools'))
                     ->sort(10)
                     ->icon(null)
                     ->visible(fn (): bool => auth()->user()->isAdmin()),
@@ -144,6 +146,11 @@ class AdminPanelProvider extends PanelProvider
                 FilamentSpatieLaravelBackupPlugin::make()
                     ->authorize(fn (): bool => auth()->user()->isAdmin())
                     ->usingPage(Backups::class),
+                FilamentLanguageSwitcherPlugin::make()
+                    ->locales(['en', 'de', 'fr', 'es'])
+                    ->showFlags(true)
+                    ->rememberLocale()
+                    ->showOnAuthPages(false),
             ])
             ->maxContentWidth($settings['content_width'])
             ->middleware([
@@ -157,6 +164,7 @@ class AdminPanelProvider extends PanelProvider
                 SubstituteBindings::class,
                 DisableBladeIconComponents::class,
                 DispatchServingFilamentEvent::class,
+                SeedLocaleFromUser::class, // Seeds session from DB locale (runs before plugin's SetLocale)
             ])
             ->authMiddleware([
                 Authenticate::class,

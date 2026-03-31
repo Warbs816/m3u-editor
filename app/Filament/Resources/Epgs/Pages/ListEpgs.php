@@ -5,14 +5,17 @@ namespace App\Filament\Resources\Epgs\Pages;
 use App\Filament\Resources\Epgs\EpgResource;
 use Filament\Actions\CreateAction;
 use Filament\Resources\Pages\ListRecords;
+use Illuminate\Contracts\Support\Htmlable;
 use Illuminate\Database\Eloquent\Builder;
 
 class ListEpgs extends ListRecords
 {
     protected static string $resource = EpgResource::class;
 
-    protected ?string $subheading = 'Add multiple EPG sources and map them to your playlists. Multiple EPG sources can be mapped to the same playlist, and the guide data will be merged together.';
-
+    public function getSubheading(): string|\Illuminate\Contracts\Support\Htmlable|null
+    {
+        return __('Add multiple EPG sources and map them to your playlists. Multiple EPG sources can be mapped to the same playlist, and the guide data will be merged together.');
+    }
     protected function getHeaderActions(): array
     {
         return [
