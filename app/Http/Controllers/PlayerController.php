@@ -25,7 +25,8 @@ class PlayerController extends Controller
         }
 
         $streamFormat = strtolower((string) $request->query('format', 'ts'));
-        if (! preg_match('/^[a-z0-9]+$/', $streamFormat)) {
+        $supportedStreamFormats = ['ts', 'mpegts', 'hls', 'm3u8', 'mp4', 'm4v', 'mkv', 'webm', 'mov'];
+        if (! in_array($streamFormat, $supportedStreamFormats, true)) {
             $streamFormat = 'ts';
         }
 

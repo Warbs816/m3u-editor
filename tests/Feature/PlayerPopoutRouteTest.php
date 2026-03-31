@@ -6,6 +6,18 @@ use Tests\TestCase;
 
 class PlayerPopoutRouteTest extends TestCase
 {
+    protected function setUp(): void
+    {
+        parent::setUp();
+
+        $this->withoutVite();
+
+        config([
+            'cache.default' => 'array',
+            'session.driver' => 'array',
+        ]);
+    }
+
     public function test_returns_404_for_player_popout_without_stream_url(): void
     {
         $this->get('/player/popout')
@@ -41,5 +53,12 @@ class PlayerPopoutRouteTest extends TestCase
         $this->get('/player/popout?url=http://example.test/stream.ts&format=avi')
             ->assertOk()
             ->assertSee('data-format="ts"', false);
+    }
+
+    public function test_preserves_supported_native_stream_format(): void
+    {
+        $this->get('/player/popout?url=http://example.test/stream.mp4&format=mp4')
+            ->assertOk()
+            ->assertSee('data-format="mp4"', false);
     }
 }
