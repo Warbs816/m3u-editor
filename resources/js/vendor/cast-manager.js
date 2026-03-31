@@ -114,7 +114,7 @@ document.addEventListener('alpine:init', () => {
          * @param {Function} onBeforeCast   Called after session is acquired, before media loads — stop local player here
          * @param {Function} onCastStopped  Called when the cast session ends — resume local player here
          */
-        async startCast(url, format, title, logo, onBeforeCast, onCastStopped) {
+        async startCast(url, format, title, logo, onBeforeCast, onCastStopped, contentTypeHint = null) {
             if (!window.cast || !window.chrome?.cast) {
                 console.warn('[CastManager] Cast SDK not available');
                 return;
@@ -149,9 +149,7 @@ document.addEventListener('alpine:init', () => {
                 const contentType = this._getMimeType(format, resolvedUrl);
 
                 const mediaInfo = new chrome.cast.media.MediaInfo(resolvedUrl, contentType);
-                mediaInfo.streamType = this._isLiveFormat(format, url)
-                    ? chrome.cast.media.StreamType.LIVE
-                    : chrome.cast.media.StreamType.BUFFERED;
+                mediaInfo.streamType = this._getStreamType(contentTypeHint, format, url);
                 mediaInfo.customData = {
                     debug: {
                         requestedUrl: resolvedUrl,
@@ -291,6 +289,16 @@ document.addEventListener('alpine:init', () => {
             // HLS and TS streams from IPTV are typically live
             return f === 'hls' || f === 'm3u8' || f === 'ts' || f === 'mpegts'
                 || (url && url.includes('.m3u8'));
+        },
+
+        _getStreamType(contentTypeHint, format, url) {
+            if (contentTypeHint === 'vod' || contentTypeHint === 'episode') {
+                return chrome.cast.media.StreamType.BUFFERED;
+            }
+
+            return this._isLiveFormat(format, url)
+                ? chrome.cast.media.StreamType.LIVE
+                : chrome.cast.media.StreamType.BUFFERED;
         },
     });
 });

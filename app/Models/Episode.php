@@ -104,20 +104,7 @@ class Episode extends Model
             internal: true
         );
 
-        if ($username && $password) {
-            $castUsername = $username;
-            $castPassword = $password;
-        } else {
-            $castUsername = $this->user->name ?? 'admin';
-            $castPassword = $this->playlist?->uuid ?? 'missing-playlist';
-        }
-        $castUrl = route('cast.stream.series', [
-            'username' => $castUsername,
-            'password' => $castPassword,
-            'streamId' => $this->id,
-            'format' => 'm3u8',
-        ]);
-        $castFormat = 'm3u8';
+        [$castUrl, $castFormat] = $this->getCastPlaybackAttributes($username, $password);
 
         return [
             'id' => 'episode-'.$this->id,
@@ -133,6 +120,37 @@ class Episode extends Model
             'cast_format' => $castFormat,
             'type' => 'episode',
         ];
+    }
+
+    protected function getCastPlaybackAttributes(?string $username = null, ?string $password = null): array
+    {
+        $playlist = $this->playlist ?? Playlist::find($this->playlist_id);
+
+        if ($username && $password) {
+            return [
+                route('cast.stream.series', [
+                    'username' => $username,
+                    'password' => $password,
+                    'streamId' => $this->id,
+                    'format' => 'm3u8',
+                ]),
+                'm3u8',
+            ];
+        }
+
+        if ($playlist?->uuid) {
+            return [
+                route('cast.stream.series', [
+                    'username' => $this->user->name ?? 'admin',
+                    'password' => $playlist->uuid,
+                    'streamId' => $this->id,
+                    'format' => 'm3u8',
+                ]),
+                'm3u8',
+            ];
+        }
+
+        return [null, null];
     }
 
     /**

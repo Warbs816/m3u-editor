@@ -127,9 +127,13 @@ class EpgViewer extends Component implements HasActions, HasForms
                             $icon = url('/placeholder.png');
                         }
 
+                        $playerAttributes = $record->getFloatingPlayerAttributes($this->username, $this->password);
+
                         // Add URL, format, and icon to channel data
                         $channelData['url'] = $url;
                         $channelData['format'] = $channelFormat;
+                        $channelData['cast_url'] = $playerAttributes['cast_url'] ?? null;
+                        $channelData['cast_format'] = $playerAttributes['cast_format'] ?? null;
                         $channelData['icon'] = $icon;
 
                         // Fetch programme data for Playlist channels if they have an EPG channel

@@ -328,6 +328,8 @@ class EpgApiController extends Controller
                 $channelResults = $channel->getFloatingPlayerAttributes(username: $username, password: $password);
                 $url = $channelResults['url'] ?? '';
                 $channelFormat = $channelResults['format'] ?? '';
+                $castUrl = $channelResults['cast_url'] ?? null;
+                $castFormat = $channelResults['cast_format'] ?? null;
 
                 // Get the icon
                 $icon = '';
@@ -354,6 +356,8 @@ class EpgApiController extends Controller
                     'playlist_id' => $playlist->id,
                     'url' => $url,
                     'format' => $channelFormat,
+                    'cast_url' => $castUrl,
+                    'cast_format' => $castFormat,
                     'tvg_id' => $tvgId,
                     'display_name' => $channel->title_custom ?? $channel->title,
                     'title' => $channel->name_custom ?? $channel->name,
