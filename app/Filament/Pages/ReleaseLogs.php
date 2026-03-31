@@ -16,7 +16,10 @@ class ReleaseLogs extends Page
         return __('Release Logs');
     }
 
-    protected static ?string $title = 'Release Logs';
+    public function getTitle(): string
+    {
+        return __('Release Logs');
+    }
 
     public static function getNavigationGroup(): ?string
     {

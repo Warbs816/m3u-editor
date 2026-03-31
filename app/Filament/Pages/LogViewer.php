@@ -15,7 +15,10 @@ class LogViewer extends Page
         return __('Debug Logs');
     }
 
-    protected static ?string $title = 'Debug Logs';
+    public function getTitle(): string
+    {
+        return __('Debug Logs');
+    }
 
     public static function getNavigationGroup(): ?string
     {

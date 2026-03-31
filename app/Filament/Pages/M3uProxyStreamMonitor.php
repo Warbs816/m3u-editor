@@ -30,7 +30,10 @@ class M3uProxyStreamMonitor extends Page
         return __('Stream Monitor');
     }
 
-    protected static ?string $title = 'M3U Proxy Stream Monitor';
+    public function getTitle(): string
+    {
+        return __('M3U Proxy Stream Monitor');
+    }
 
     /**
      * Check if the user can access this page.

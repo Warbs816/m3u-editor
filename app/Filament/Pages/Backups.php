@@ -138,7 +138,7 @@ class Backups extends BaseBackups
 
     public function getHeading(): string|Htmlable
     {
-        return 'Manage Backups';
+        return __('Manage Backups');
     }
 
     public static function getNavigationGroup(): ?string

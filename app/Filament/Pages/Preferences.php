@@ -54,7 +54,10 @@ class Preferences extends SettingsPage
         return __('Settings');
     }
 
-    protected static ?string $title = 'Settings';
+    public function getTitle(): string
+    {
+        return __('Settings');
+    }
 
     /**
      * Check if the user can access this page.

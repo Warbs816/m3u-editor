@@ -13,6 +13,11 @@ class CustomDashboard extends Dashboard
         return __('Dashboard');
     }
 
+    public function getHeading(): string
+    {
+        return __('Dashboard');
+    }
+
     protected function getActions(): array
     {
         return [
