@@ -84,8 +84,8 @@ class ViewVod extends ViewRecord
                     'title' => $this->record->title_custom ?? $this->record->title ?? $this->record->name,
                     'url' => $this->record->getProxyUrl(internal: true),
                     'format' => $this->record->container_extension ?? 'ts',
-                    'cast_url' => $this->record->getProxyUrl(profileFormat: 'm3u8', internal: false),
-                    'cast_format' => 'm3u8',
+                    'cast_url' => $this->record->getFloatingPlayerAttributes()['cast_url'],
+                    'cast_format' => $this->record->getFloatingPlayerAttributes()['cast_format'],
                     'type' => 'channel',
                 ]]),
         ];

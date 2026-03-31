@@ -69,10 +69,15 @@
             <div id="popout-player-error"
                 class="absolute inset-0 hidden items-center justify-center bg-black bg-opacity-75">
                 <div class="p-4 text-center">
-                    <h2 class="text-lg font-semibold">Playback Error</h2>
+                    <div id="popout-player-error-icon" class="mx-auto mb-2 flex justify-center">
+                        <svg class="h-8 w-8 text-red-400" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M12 9v3.75m9.303 3.376c.866 1.5-.217 3.374-1.949 3.374H4.646c-1.732 0-2.815-1.874-1.949-3.374L10.051 3.374c.866-1.5 3.032-1.5 3.898 0l7.354 12.752ZM12 16.5h.008v.008H12V16.5Z" />
+                        </svg>
+                    </div>
+                    <h2 id="popout-player-error-title" class="text-lg font-semibold">Playback Error</h2>
                     <p id="popout-player-error-message" class="mt-2 text-sm text-white/75">Unable to load the stream.
                     </p>
-                    <button type="button" onclick="retryStream('popout-player')"
+                    <button id="popout-player-error-retry" type="button" onclick="retryStream('popout-player')"
                         class="mt-4 rounded bg-blue-600 px-4 py-2 text-sm font-medium hover:bg-blue-500">
                         Retry
                     </button>
@@ -260,6 +265,72 @@
                 );
             }
 
+            function setLocalPlaybackSuspendedForCast(suspended) {
+                if (!videoElement) {
+                    return;
+                }
+
+                if (suspended) {
+                    videoElement.dataset.localPlaybackSuspendedForCast = 'true';
+                } else {
+                    delete videoElement.dataset.localPlaybackSuspendedForCast;
+                }
+            }
+
+            function showCastingState() {
+                const loadingEl = document.getElementById('popout-player-loading');
+                const errorEl = document.getElementById('popout-player-error');
+                const errorMessageEl = document.getElementById('popout-player-error-message');
+                const errorTitleEl = document.getElementById('popout-player-error-title');
+                const retryButton = document.getElementById('popout-player-error-retry');
+                const errorIcon = document.getElementById('popout-player-error-icon');
+
+                if (loadingEl) {
+                    loadingEl.style.display = 'none';
+                }
+                if (errorEl) {
+                    errorEl.classList.remove('hidden');
+                    errorEl.style.display = 'flex';
+                }
+                if (errorTitleEl) {
+                    errorTitleEl.textContent = 'Casting to your device';
+                }
+                if (errorMessageEl) {
+                    errorMessageEl.textContent = 'Playback has moved to Chromecast. Stop casting to resume playback here.';
+                }
+                if (retryButton) {
+                    retryButton.classList.add('hidden');
+                }
+                if (errorIcon) {
+                    errorIcon.innerHTML = '<svg class="h-8 w-8 text-blue-400" viewBox="0 0 24 24" fill="currentColor" xmlns="http://www.w3.org/2000/svg"><path d="M1 18v3h3c0-1.66-1.34-3-3-3zm0-4v2c2.76 0 5 2.24 5 5h2c0-3.87-3.13-7-7-7zm0-4v2c4.97 0 9 4.03 9 9h2c0-6.08-4.93-11-11-11zm20-7H3c-1.1 0-2 .9-2 2v3h2V5h18v14h-7v2h7c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2z"/></svg>';
+                }
+            }
+
+            function clearCastingState() {
+                const errorEl = document.getElementById('popout-player-error');
+                const errorMessageEl = document.getElementById('popout-player-error-message');
+                const errorTitleEl = document.getElementById('popout-player-error-title');
+                const retryButton = document.getElementById('popout-player-error-retry');
+                const errorIcon = document.getElementById('popout-player-error-icon');
+
+                if (errorEl) {
+                    errorEl.classList.add('hidden');
+                    errorEl.style.display = 'none';
+                }
+                if (errorTitleEl) {
+                    errorTitleEl.textContent = 'Playback Error';
+                }
+                if (errorMessageEl) {
+                    errorMessageEl.textContent = 'Unable to load the stream.';
+                }
+                if (retryButton) {
+                    retryButton.classList.remove('hidden');
+                }
+                if (errorIcon) {
+                    errorIcon.innerHTML = '<svg class="h-8 w-8 text-red-400" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M12 9v3.75m9.303 3.376c.866 1.5-.217 3.374-1.949 3.374H4.646c-1.732 0-2.815-1.874-1.949-3.374L10.051 3.374c.866-1.5 3.032-1.5 3.898 0l7.354 12.752ZM12 16.5h.008v.008H12V16.5Z" /></svg>';
+                }
+            }
+
             function stopLocalPlayer() {
                 const video = document.getElementById('popout-player');
                 if (video && video._streamPlayer) {
@@ -288,18 +359,31 @@
                     return;
                 }
 
-                // Stop local playback to free the proxy connection
-                stopLocalPlayer();
-
                 const castUrl = videoElement.dataset.castUrl || @json($castUrl);
                 const castFormat = videoElement.dataset.castFormat || @json($castFormat);
+
+                if (!castUrl) {
+                    console.warn('[PopoutCast] No cast-safe URL available', {
+                        title: @json($channelTitle),
+                        streamUrl: @json($streamUrl),
+                    });
+                    return;
+                }
+
+                // Stop local playback to free the proxy connection
+                setLocalPlaybackSuspendedForCast(true);
+                stopLocalPlayer();
+                showCastingState();
+
                 const url = toAbsoluteUrl(castUrl);
                 const resolvedUrl = url;
                 const format = castFormat;
                 const contentType = getMimeType(format, resolvedUrl);
 
                 const mediaInfo = new chrome.cast.media.MediaInfo(resolvedUrl, contentType);
-                mediaInfo.streamType = chrome.cast.media.StreamType.LIVE;
+                mediaInfo.streamType = (@json($contentType) === 'vod' || @json($contentType) === 'episode')
+                    ? chrome.cast.media.StreamType.BUFFERED
+                    : chrome.cast.media.StreamType.LIVE;
                 mediaInfo.customData = {
                     debug: {
                         requestedUrl: resolvedUrl,
@@ -357,6 +441,8 @@
                 isCasting = false;
                 castSession = null;
                 updateButton();
+                clearCastingState();
+                setLocalPlaybackSuspendedForCast(false);
 
                 // Resume local playback when cast ends
                 if (wasCasting) {

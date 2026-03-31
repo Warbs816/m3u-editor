@@ -7,32 +7,58 @@ it('rejects cast segment requests without source', function () {
         ->assertUnprocessable();
 });
 
-it('rejects cast segment requests for non proxy sources', function () {
+it('rejects cast segment requests with invalid source urls', function () {
     $this->get(route('cast.stream.segment', [
-        'source' => 'https://example.com/video.ts',
+        'source' => 'not-a-url',
     ]))
         ->assertUnprocessable();
 });
 
-it('rejects cast segment requests for cross-host m3u proxy sources', function () {
-    $this->get(route('cast.stream.segment', [
-        'source' => 'https://evil.test/m3u-proxy/hls/abc123/segment.ts?url=http%3A%2F%2Fupstream.test%2Fseg.ts',
-    ]))
-        ->assertUnprocessable();
-});
-
-it('proxies cast segment requests for same-host m3u proxy sources', function () {
+it('proxies cast segment requests for allowed absolute urls', function () {
     Http::fake([
-        'https://m3u-editor.test/m3u-proxy/hls/abc123/segment.ts?url=http%3A%2F%2Fupstream.test%2Fseg.ts&client_id=client_1' => Http::response('segment-bytes', 200, [
+        'https://cdn.example.com/hls/abc123/segment.ts?token=123' => Http::response('segment-bytes', 200, [
             'Content-Type' => 'video/mp2t',
         ]),
     ]);
 
     $response = $this->get(route('cast.stream.segment', [
-        'source' => 'https://m3u-editor.test/m3u-proxy/hls/abc123/segment.ts?url=http%3A%2F%2Fupstream.test%2Fseg.ts&client_id=client_1',
+        'source' => 'https://cdn.example.com/hls/abc123/segment.ts?token=123',
     ]));
 
     $response->assertSuccessful();
     $response->assertHeader('Content-Type', 'video/mp2t');
     expect($response->getContent())->toBe('segment-bytes');
+});
+
+it('rewrites uri attributes and nested playlist entries when proxying playlist resources', function () {
+    Http::fake([
+        'https://cdn.example.com/hls/variant.m3u8' => Http::response(implode("\n", [
+            '#EXTM3U',
+            '#EXT-X-VERSION:3',
+            '#EXT-X-KEY:METHOD=AES-128,URI="keys/key.bin"',
+            '#EXT-X-MAP:URI="init.mp4"',
+            '#EXTINF:10,',
+            'segments/seg-001.ts',
+        ]), 200, [
+            'Content-Type' => 'application/vnd.apple.mpegurl',
+            'Content-Length' => '999',
+        ]),
+    ]);
+
+    $response = $this->get(route('cast.stream.segment', [
+        'source' => 'https://cdn.example.com/hls/variant.m3u8',
+    ]));
+
+    $response->assertSuccessful();
+    $response->assertHeader('Content-Type', 'application/vnd.apple.mpegurl');
+    $response->assertHeaderMissing('Content-Length');
+    $response->assertSee(route('cast.stream.segment', [
+        'source' => 'https://cdn.example.com/hls/keys/key.bin',
+    ]), false);
+    $response->assertSee(route('cast.stream.segment', [
+        'source' => 'https://cdn.example.com/hls/init.mp4',
+    ]), false);
+    $response->assertSee(route('cast.stream.segment', [
+        'source' => 'https://cdn.example.com/hls/segments/seg-001.ts',
+    ]), false);
 });

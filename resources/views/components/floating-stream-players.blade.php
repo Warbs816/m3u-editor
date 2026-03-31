@@ -69,8 +69,18 @@
                         x-show="$store.cast && $store.cast.isReady"
                         x-cloak
                         @click.stop="
-                            const castUrl = player.cast_url || player.url;
+                            const castUrl = player.cast_url || '';
                             const castFormat = player.cast_format || player.format;
+                            const castContentType = player.content_type || null;
+
+                            if (!castUrl) {
+                                console.warn('[CastManager] No cast-safe URL available for player', {
+                                    title: player.title,
+                                    playerId: player.id,
+                                    streamId: player.stream_id,
+                                });
+                                return;
+                            }
 
                             if ($store.cast.isCasting && $store.cast.currentStreamUrl === castUrl) {
                                 $store.cast.stopCast();
@@ -80,26 +90,35 @@
                                     castUrl, castFormat, player.title, player.logo,
                                     () => {
                                         // Stop local playback to free the proxy connection
+                                        if (videoEl) {
+                                            videoEl.dataset.localPlaybackSuspendedForCast = 'true';
+                                        }
                                         if (videoEl && videoEl._streamPlayer) {
                                             videoEl._streamPlayer.cleanup();
                                         }
                                     },
                                     () => {
                                         // Resume local playback when cast ends
+                                        if (videoEl) {
+                                            delete videoEl.dataset.localPlaybackSuspendedForCast;
+                                        }
                                         if (videoEl && window.streamPlayer) {
                                             const sp = window.streamPlayer();
                                             sp.initPlayer(player.url, player.format, player.id + '-video');
                                         }
-                                    }
+                                    },
+                                    castContentType
                                 );
                             }
                         "
                         :class="{
-                            'text-blue-500 dark:text-blue-400': $store.cast.isCasting && $store.cast.currentStreamUrl === (player.cast_url || player.url),
-                            'text-gray-400 hover:text-blue-600 dark:hover:text-blue-400': !($store.cast.isCasting && $store.cast.currentStreamUrl === (player.cast_url || player.url))
+                            'text-blue-500 dark:text-blue-400': player.cast_url && $store.cast.isCasting && $store.cast.currentStreamUrl === player.cast_url,
+                            'text-gray-400 hover:text-blue-600 dark:hover:text-blue-400': !(player.cast_url && $store.cast.isCasting && $store.cast.currentStreamUrl === player.cast_url),
+                            'opacity-40 cursor-not-allowed hover:text-gray-400 dark:hover:text-gray-400': !player.cast_url,
                         }"
-                        class="p-1 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded transition-colors focus:outline-none"
-                        :title="$store.cast.isCasting && $store.cast.currentStreamUrl === (player.cast_url || player.url) ? 'Stop casting' : 'Cast to Chromecast'"
+                        :disabled="!player.cast_url"
+                        class="p-1 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded transition-colors focus:outline-none disabled:hover:bg-transparent"
+                        :title="!player.cast_url ? 'Cast unavailable for this stream' : ($store.cast.isCasting && $store.cast.currentStreamUrl === player.cast_url ? 'Stop casting' : 'Cast to Chromecast')"
                     >
                         <svg class="w-3 h-3" viewBox="0 0 24 24" fill="currentColor" xmlns="http://www.w3.org/2000/svg">
                             <path d="M1 18v3h3c0-1.66-1.34-3-3-3zm0-4v2c2.76 0 5 2.24 5 5h2c0-3.87-3.13-7-7-7zm0-4v2c4.97 0 9 4.03 9 9h2c0-6.08-4.93-11-11-11zm20-7H3c-1.1 0-2 .9-2 2v3h2V5h18v14h-7v2h7c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2z"/>
@@ -196,9 +215,13 @@
                     class="absolute inset-0 flex items-center justify-center bg-black bg-opacity-75 hidden"
                 >
                     <div class="text-center text-white p-4">
-                        <x-heroicon-o-exclamation-triangle class="w-8 h-8 mx-auto mb-2 text-red-400" />
-                        <p class="text-sm">Failed to load stream</p>
+                        <div :id="player.id + '-video-error-icon'" class="mx-auto mb-2 flex justify-center">
+                            <x-heroicon-o-exclamation-triangle class="w-8 h-8 text-red-400" />
+                        </div>
+                        <p :id="player.id + '-video-error-title'" class="text-sm font-medium">Playback Error</p>
+                        <p :id="player.id + '-video-error-message'" class="mt-1 text-xs text-white/75">Failed to load stream</p>
                         <button 
+                            :id="player.id + '-video-error-retry'"
                             class="mt-2 px-3 py-1 bg-red-600 hover:bg-red-700 rounded text-xs transition-colors"
                             @click="
                                 const videoEl = document.getElementById(player.id + '-video');

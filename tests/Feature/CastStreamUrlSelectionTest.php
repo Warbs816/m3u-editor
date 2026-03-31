@@ -22,7 +22,7 @@ it('includes a dedicated hls cast url for floating channel players', function ()
     expect($attributes['cast_url'])->toContain('/cast/live/Harry/playlist-uuid/'.$channel->id.'.m3u8');
 });
 
-it('falls back to a non-empty cast password when playlist context is missing', function () {
+it('returns no cast url when playlist context is missing', function () {
     $user = User::factory()->create(['name' => 'Harry']);
 
     $channel = Channel::factory()->for($user)->create([
@@ -34,8 +34,8 @@ it('falls back to a non-empty cast password when playlist context is missing', f
 
     $attributes = $channel->getFloatingPlayerAttributes();
 
-    expect($attributes['cast_url'])->toContain('/cast/live/Harry/missing-playlist/'.$channel->id.'.m3u8');
-    expect($attributes['cast_format'])->toBe('m3u8');
+    expect($attributes['cast_url'])->toBeNull();
+    expect($attributes['cast_format'])->toBeNull();
 });
 
 it('includes a dedicated hls cast url for floating episode players', function () {

@@ -343,6 +343,9 @@ class EpgApiController extends Controller
                 // Get the channel URL and format from the computed attribute, which handles proxy logic
                 // Use internal (relative) URLs for the in-app player to prevent CORS issues
                 [$url, $channelFormat] = $channel->getProxyUrl(withFormat: true, username: $username, password: $password, internal: true);
+                $playerAttributes = $channel->getFloatingPlayerAttributes($username, $password);
+                $castUrl = $playerAttributes['cast_url'] ?? null;
+                $castFormat = $playerAttributes['cast_format'] ?? null;
 
                 // Get the icon
                 $icon = '';
@@ -368,9 +371,11 @@ class EpgApiController extends Controller
                     'content_type' => $channel->is_vod ? 'vod' : 'live',
                     'playlist_id' => $playlist->id,
                     'url' => $url,
+                    'cast_url' => $castUrl,
                     'format' => $channel->is_vod
                         ? ($vodProfile->format ?? $channelFormat)
                         : ($liveProfile->format ?? $channelFormat),
+                    'cast_format' => $castFormat,
                     'tvg_id' => $tvgId,
                     'display_name' => $channel->title_custom ?? $channel->title,
                     'title' => $channel->name_custom ?? $channel->name,

@@ -167,21 +167,7 @@ class Channel extends Model
             internal: true
         );
 
-        if ($username && $password) {
-            $castUsername = $username;
-            $castPassword = $password;
-        } else {
-            $castUsername = $this->user->name ?? 'admin';
-            $castPassword = $this->playlist?->uuid ?? $this->customPlaylist?->uuid ?? 'missing-playlist';
-        }
-        $castRoute = $this->is_vod ? 'cast.stream.movie' : 'cast.stream.live';
-        $castUrl = route($castRoute, [
-            'username' => $castUsername,
-            'password' => $castPassword,
-            'streamId' => $this->id,
-            'format' => 'm3u8',
-        ]);
-        $castFormat = 'm3u8';
+        [$castUrl, $castFormat] = $this->getCastPlaybackAttributes($username, $password);
 
         return [
             'id' => $this->id,
@@ -195,6 +181,46 @@ class Channel extends Model
             'cast_format' => $castFormat,
             'type' => 'channel',
         ];
+    }
+
+    protected function getCastPlaybackAttributes(?string $username = null, ?string $password = null): array
+    {
+        $castRoute = $this->is_vod ? 'cast.stream.movie' : 'cast.stream.live';
+        $playlist = $this->playlist;
+
+        if (! $playlist?->uuid) {
+            $playlist = $this->customPlaylist;
+        }
+
+        if (! $playlist?->uuid) {
+            $playlist = Playlist::find($this->playlist_id ?: $this->custom_playlist_id);
+        }
+
+        if ($username && $password) {
+            return [
+                route($castRoute, [
+                    'username' => $username,
+                    'password' => $password,
+                    'streamId' => $this->id,
+                    'format' => 'm3u8',
+                ]),
+                'm3u8',
+            ];
+        }
+
+        if ($playlist?->uuid) {
+            return [
+                route($castRoute, [
+                    'username' => $this->user->name ?? 'admin',
+                    'password' => $playlist->uuid,
+                    'streamId' => $this->id,
+                    'format' => 'm3u8',
+                ]),
+                'm3u8',
+            ];
+        }
+
+        return [null, null];
     }
 
     /**
