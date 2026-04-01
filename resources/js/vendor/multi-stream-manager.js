@@ -93,6 +93,7 @@ function multiStreamManager() {
                 channelId: channelData.id || null,
                 channelType: channelData.type || null,
                 title: channelData.title || channelData.name || 'Unknown Channel',
+                display_title: channelData.display_title || channelData.title || channelData.name || 'Unknown Channel',
                 logo: channelData.logo || channelData.icon || '',
                 url: channelData.url || '',
                 format: channelData.format || 'ts',
@@ -254,6 +255,7 @@ function multiStreamManager() {
 
             const params = new URLSearchParams({
                 title: player.title ?? '',
+                display_title: player.display_title ?? player.title ?? '',
                 logo: player.logo ?? '',
                 url: player.url ?? '',
                 format: player.format ?? 'ts',
