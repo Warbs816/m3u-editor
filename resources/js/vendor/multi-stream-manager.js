@@ -27,50 +27,47 @@ function multiStreamManager() {
                 return;
             }
 
-            // Check if we already have a listener
-            if (window._floatingStreamListenerAdded) {
-                return;
+            // Update global reference to Alpine's reactive proxy so delegated
+            // calls from event listeners trigger reactivity and update the DOM.
+            window._globalMultiStreamManager = this;
+
+            // Register window-level listeners exactly once, delegating through the
+            // global ref so a single set of listeners always reaches the current
+            // manager instance even after Livewire SPA navigations replace it.
+            if (!window._floatingStreamListenerAdded) {
+                window.addEventListener('openFloatingStream', (event) => {
+                    let detail = event.detail;
+                    if (Array.isArray(detail)) {
+                        detail = detail[0];
+                    }
+                    console.log('Received openFloatingStream event:', detail);
+                    event.stopPropagation();
+                    window._globalMultiStreamManager?.openStream(detail);
+                });
+
+                window.addEventListener('beforeunload', () => {
+                    window._globalMultiStreamManager?.cleanupAllStreams();
+                });
+                window.addEventListener('pagehide', () => {
+                    window._globalMultiStreamManager?.cleanupAllStreams();
+                });
+                window.addEventListener('livewire:navigating', () => {
+                    window._globalMultiStreamManager?.cleanupAllStreams();
+                });
+
+                document.addEventListener('visibilitychange', () => {
+                    if (document.visibilityState === 'hidden') {
+                        window._globalMultiStreamManager?.pauseAllStreams();
+                    } else if (document.visibilityState === 'visible') {
+                        window._globalMultiStreamManager?.resumeAllStreams();
+                    }
+                });
+
+                document.addEventListener('mousemove', (e) => window._globalMultiStreamManager?.handleMouseMove(e));
+                document.addEventListener('mouseup', () => window._globalMultiStreamManager?.handleMouseUp());
+
+                window._floatingStreamListenerAdded = true;
             }
-
-            // Listen for new stream requests
-            window.addEventListener('openFloatingStream', (event) => {
-                let detail = event.detail;
-                if (Array.isArray(detail)) {
-                    detail = detail[0];
-                }
-                console.log('Received openFloatingStream event:', detail);
-                event.stopPropagation(); // Prevent event bubbling
-                this.openStream(detail);
-            });
-
-            // Mark that we've added the listener
-            window._floatingStreamListenerAdded = true;
-
-            // Cleanup on page unload (beforeunload + pagehide for mobile Safari)
-            window.addEventListener('beforeunload', () => {
-                this.cleanupAllStreams();
-            });
-            window.addEventListener('pagehide', () => {
-                this.cleanupAllStreams();
-            });
-
-            // Cleanup on Livewire SPA navigation
-            window.addEventListener('livewire:navigating', () => {
-                this.cleanupAllStreams();
-            });
-
-            // Pause/resume streams on tab visibility change (saves bandwidth on mobile)
-            document.addEventListener('visibilitychange', () => {
-                if (document.visibilityState === 'hidden') {
-                    this.pauseAllStreams();
-                } else if (document.visibilityState === 'visible') {
-                    this.resumeAllStreams();
-                }
-            });
-
-            // Global mouse events for drag and resize
-            document.addEventListener('mousemove', (e) => this.handleMouseMove(e));
-            document.addEventListener('mouseup', () => this.handleMouseUp());
 
             // Mark as initialized
             this._initialized = true;

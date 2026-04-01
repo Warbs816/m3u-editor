@@ -14,10 +14,7 @@
                     console.warn('Error during cleanup:', e);
                 }
             }
-            
-            // Reset global state
-            window._floatingStreamListenerAdded = false;
-            
+
             // Create new instance with unique ID
             const manager = multiStreamManager();
             manager._instanceId = instanceId;
@@ -95,6 +92,10 @@
                                         }
                                         if (videoEl && videoEl._streamPlayer) {
                                             videoEl._streamPlayer.cleanup();
+                                        }
+                                        // Show the casting overlay
+                                        if (window.streamPlayer) {
+                                            window.streamPlayer().showError(player.id + '-video', 'Casting');
                                         }
                                     },
                                     () => {
