@@ -540,7 +540,7 @@ class ListVod extends ListRecords
     public function updatedActiveTab(): void
     {
         parent::updatedActiveTab();
-        $this->statusFilter = 'all';
+        $this->resetPage();
     }
 
     public function updatedStatusFilter(): void
