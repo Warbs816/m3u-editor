@@ -7,10 +7,16 @@ use App\Models\Season;
 use App\Models\Series;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Bus;
+use Illuminate\Support\Facades\Config;
 
 uses(RefreshDatabase::class);
 
 beforeEach(function () {
+    Bus::fake();
+    Config::set('cache.default', 'array');
+    Config::set('session.driver', 'array');
+
     $this->user = User::factory()->create(['name' => 'testuser']);
     $this->playlist = Playlist::factory()->for($this->user)->create();
 });

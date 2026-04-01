@@ -10,9 +10,7 @@ use App\Http\Controllers\LogoProxyController;
 use App\Http\Controllers\PlaylistGenerateController;
 use App\Models\Epg;
 use App\Models\Playlist;
-use App\Models\StreamProfile;
 use App\Services\EpgCacheService;
-use App\Settings\GeneralSettings;
 use Carbon\Carbon;
 use Exception;
 use Illuminate\Http\JsonResponse;
@@ -222,21 +220,6 @@ class EpgApiController extends Controller
                 ->offset($skip)
                 ->cursor();
 
-            // Get the stream profile to use for the floating player
-            // Prefer playlist profiles over globals
-            $settings = app(GeneralSettings::class);
-            $vodProfile = $playlist->vodStreamProfile;
-            $liveProfile = $playlist->streamProfile;
-
-            if (! $vodProfile) {
-                $vodProfileId = $settings->default_vod_stream_profile_id ?? null;
-                $vodProfile = $vodProfileId ? StreamProfile::find($vodProfileId) : null;
-            }
-            if (! $liveProfile) {
-                $liveProfileId = $settings->default_stream_profile_id ?? null;
-                $liveProfile = $liveProfileId ? StreamProfile::find($liveProfileId) : null;
-            }
-
             // Check the proxy format
             $proxyEnabled = $playlist->enable_proxy;
             $logoProxyEnabled = $playlist->enable_logo_proxy;
@@ -340,9 +323,9 @@ class EpgApiController extends Controller
                         break;
                 }
 
-                // Get the channel URL and format from the computed attribute, which handles proxy logic
-                // Use internal (relative) URLs for the in-app player to prevent CORS issues
-                [$url, $channelFormat] = $channel->getProxyUrl(withFormat: true, username: $username, password: $password, internal: true);
+                // Build in-app player payload via the model helper so only in-app playback
+                // uses the dedicated signed player routes and in-app transcoding defaults.
+                $playerAttributes = $channel->getFloatingPlayerAttributes($username, $password);
 
                 // Get the icon
                 $icon = '';
@@ -367,10 +350,8 @@ class EpgApiController extends Controller
                     'stream_id' => $channel->id,
                     'content_type' => $channel->is_vod ? 'vod' : 'live',
                     'playlist_id' => $playlist->id,
-                    'url' => $url,
-                    'format' => $channel->is_vod
-                        ? ($vodProfile->format ?? $channelFormat)
-                        : ($liveProfile->format ?? $channelFormat),
+                    'url' => $playerAttributes['url'],
+                    'format' => $playerAttributes['format'],
                     'tvg_id' => $tvgId,
                     'display_name' => $channel->title_custom ?? $channel->title,
                     'title' => $channel->name_custom ?? $channel->name,

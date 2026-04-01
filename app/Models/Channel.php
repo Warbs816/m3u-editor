@@ -155,13 +155,11 @@ class Channel extends Model
         } else {
             $profileId = $settings->default_stream_profile_id ?? null;
         }
-        $profile = $profileId ? StreamProfile::find($profileId) : null;
 
-        // Always proxy the internal player so we can attempt to transcode the stream for better compatibility
-        // Use internal (relative) URLs to prevent CORS and mixed-content issues
-        [$url, $format] = $this->getProxyUrl(
+        $profile = $profileId ? StreamProfile::find($profileId) : null;
+        $url = URL::temporarySignedRoute('m3u-proxy.channel.player', now()->addHour(), ['id' => $this->id], absolute: false);
+        [, $format] = $this->getProxyUrl(
             withFormat: true,
-            profileFormat: $profile->format ?? null,
             username: $username,
             password: $password,
             internal: true
