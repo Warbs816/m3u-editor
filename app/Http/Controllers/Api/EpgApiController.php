@@ -352,6 +352,8 @@ class EpgApiController extends Controller
                     'playlist_id' => $playlist->id,
                     'url' => $playerAttributes['url'],
                     'format' => $playerAttributes['format'],
+                    'cast_url' => $playerAttributes['cast_url'] ?? null,
+                    'cast_format' => $playerAttributes['cast_format'] ?? null,
                     'tvg_id' => $tvgId,
                     'display_name' => $channel->title_custom ?? $channel->title,
                     'title' => $channel->name_custom ?? $channel->name,
