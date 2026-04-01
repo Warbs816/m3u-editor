@@ -25,7 +25,6 @@ class PlaylistAuth extends Model
         'enabled' => 'boolean',
         'user_id' => 'integer',
         'max_connections' => 'integer',
-        'enable_proxy' => 'integer',
         'expires_at' => 'datetime',
     ];
 
@@ -47,15 +46,17 @@ class PlaylistAuth extends Model
      */
     public function resolveEnableProxy(): ?bool
     {
-        if ($this->enable_proxy === null) {
+        $value = $this->getRawOriginal('enable_proxy');
+
+        if (is_null($value)) {
             return null;
         }
 
-        if ($this->enable_proxy && ! $this->user?->canUseProxy()) {
+        if ($value && ! $this->user?->canUseProxy()) {
             return false;
         }
 
-        return (bool) $this->enable_proxy;
+        return (bool) $value;
     }
 
     /**
