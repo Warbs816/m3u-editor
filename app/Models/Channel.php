@@ -157,8 +157,9 @@ class Channel extends Model
         }
         $profile = $profileId ? StreamProfile::find($profileId) : null;
 
-        // Always proxy the internal player so we can attempt to transcode the stream for better compatibility
-        // Use internal (relative) URLs to prevent CORS and mixed-content issues
+        // Use the Xtream URL structure to preserve auth (username/password in URL).
+        // Append ?player=true so XtreamStreamController routes this to the player
+        // endpoint that applies the in-app transcoding profile.
         [$url, $format] = $this->getProxyUrl(
             withFormat: true,
             profileFormat: $profile->format ?? null,
@@ -246,9 +247,13 @@ class Channel extends Model
         }
 
         // Append query parameter so our Xtream Stream controller knows to proxy the stream regardless of playlist settings
-        $url .= '?'.http_build_query([
+        $queryArgs = [
             'proxy' => 'true',
-        ]);
+        ];
+        if ($internal) {
+            $queryArgs['player'] = 'true';
+        }
+        $url .= '?'.http_build_query($queryArgs);
 
         return $withFormat ? [$url, $channelFormat] : $url;
     }

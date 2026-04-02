@@ -146,32 +146,24 @@ class M3uProxyApiController extends Controller
             $playlist = $channel->getEffectivePlaylist();
         }
 
-        // Load the stream profile relationships explicitly after getting the effective playlist
+        // Load the stream profile relationships (needed for playlist profile fallback)
         if ($playlist) {
             $playlist->load('streamProfile', 'vodStreamProfile');
         }
 
-        // Get stream profile from playlist if set
-        $profile = null;
+        // Prioritize in-app player transcoding profiles (from Preferences → In-App Player Transcoding)
+        // over playlist-level stream profiles for the floating player
+        $settings = app(GeneralSettings::class);
         if ($channel->is_vod) {
-            // For VOD channels, use the VOD stream profile if set
-            $profile = $playlist->vodStreamProfile;
+            $profileId = $settings->default_vod_stream_profile_id ?? null;
         } else {
-            // Get stream profile from playlist if set
-            $profile = $playlist->streamProfile;
+            $profileId = $settings->default_stream_profile_id ?? null;
         }
+        $profile = $profileId ? StreamProfile::find($profileId) : null;
 
-        // If no profile set, use default profile for the player
-        // Preview player should always try to transcode for better compatibility
+        // Fall back to playlist profile if no in-app player profile is configured
         if (! $profile) {
-            // Use default profile set for the player
-            $settings = app(GeneralSettings::class);
-            if ($channel->is_vod) {
-                $profileId = $settings->default_vod_stream_profile_id ?? null;
-            } else {
-                $profileId = $settings->default_stream_profile_id ?? null;
-            }
-            $profile = $profileId ? StreamProfile::find($profileId) : null;
+            $profile = $channel->is_vod ? $playlist->vodStreamProfile : $playlist->streamProfile;
         }
 
         $url = app(M3uProxyService::class)
@@ -204,18 +196,19 @@ class M3uProxyApiController extends Controller
             $playlist = $episode->playlist;
         }
 
-        // Load the stream profile relationships explicitly after getting the playlist
+        // Load the stream profile relationships (needed for playlist profile fallback)
         if ($playlist) {
             $playlist->load('streamProfile', 'vodStreamProfile');
         }
 
-        // Get stream profile from playlist if set
-        $profile = $playlist->vodStreamProfile;
+        // Prioritize in-app player VOD transcoding profile (from Preferences → In-App Player Transcoding)
+        $settings = app(GeneralSettings::class);
+        $profileId = $settings->default_vod_stream_profile_id ?? null;
+        $profile = $profileId ? StreamProfile::find($profileId) : null;
+
+        // Fall back to playlist VOD profile if no in-app player profile is configured
         if (! $profile) {
-            // Use default profile set for the player
-            $settings = app(GeneralSettings::class);
-            $profileId = $settings->default_vod_stream_profile_id ?? null;
-            $profile = $profileId ? StreamProfile::find($profileId) : null;
+            $profile = $playlist->vodStreamProfile;
         }
 
         $url = app(M3uProxyService::class)
