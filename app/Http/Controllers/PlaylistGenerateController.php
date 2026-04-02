@@ -222,9 +222,23 @@ class PlaylistGenerateController extends Controller
                         if ($channel->catchup) {
                             $extInf .= " catchup=\"$channel->catchup\"";
                         }
-                        if ($channel->catchup_source) {
+
+                        // Determine the catchup-source to output.
+                        // When the proxy is enabled, or when the channel URL is served via the
+                        // internal Xtream format (default), we generate a catchup-source that
+                        // points to our own timeshift endpoint so catchup requests flow through
+                        // m3u-editor rather than going directly to the provider.
+                        // This also ensures catchup works for Xtream-imported channels that have
+                        // tv_archive=1 but no catchup_source URL template stored.
+                        $useInternalXtreamFormat = ! (config('app.disable_m3u_xtream_format') ?? false);
+                        if (($proxyEnabled || $useInternalXtreamFormat) && $channel->catchup) {
+                            $catchupExt = $extension ?: 'ts';
+                            $catchupSource = "{$baseUrl}/timeshift/{$username}/{$password}/{duration}/{start}/{$channel->id}.{$catchupExt}";
+                            $extInf .= " catchup-source=\"{$catchupSource}\"";
+                        } elseif ($channel->catchup_source) {
                             $extInf .= " catchup-source=\"$channel->catchup_source\"";
                         }
+
                         if ($timeshift) {
                             $extInf .= " timeshift=\"$timeshift\"";
                         }
