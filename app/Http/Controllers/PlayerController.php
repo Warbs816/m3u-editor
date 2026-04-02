@@ -98,11 +98,14 @@ class PlayerController extends Controller
 
         $channelTitle = (string) $request->query('display_title', $request->query('title', 'Channel Player'));
 
+        $castUnavailableReason = (string) $request->query('cast_unavailable_reason', '');
+
         return view('player.popout', [
             'streamUrl' => $streamUrl,
             'streamFormat' => $streamFormat,
             'castUrl' => $castUrl,
             'castFormat' => $castFormat,
+            'castUnavailableReason' => $castUnavailableReason,
             'channelTitle' => $channelTitle,
             'channelLogo' => $channelLogo,
             'contentType' => $contentType,

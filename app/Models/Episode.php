@@ -104,7 +104,7 @@ class Episode extends Model
             internal: true
         );
 
-        [$castUrl, $castFormat] = $this->getCastPlaybackAttributes($username, $password);
+        [$castUrl, $castFormat, $castUnavailableReason] = $this->getCastPlaybackAttributes($username, $password);
 
         return [
             'id' => 'episode-'.$this->id,
@@ -119,12 +119,18 @@ class Episode extends Model
             'format' => $episodeFormat,
             'cast_url' => $castUrl,
             'cast_format' => $castFormat,
+            'cast_unavailable_reason' => $castUnavailableReason,
             'type' => 'episode',
         ];
     }
 
     protected function getCastPlaybackAttributes(?string $username = null, ?string $password = null): array
     {
+        // Episodes always need HLS transcoding for Chromecast
+        if (! Channel::hasHlsProfileForCasting()) {
+            return [null, null, 'No HLS transcoding profile configured'];
+        }
+
         $playlist = $this->playlist ?? Playlist::find($this->playlist_id);
 
         if ($username && $password) {
@@ -136,6 +142,7 @@ class Episode extends Model
                     'format' => 'm3u8',
                 ]),
                 'm3u8',
+                null,
             ];
         }
 
@@ -148,10 +155,11 @@ class Episode extends Model
                     'format' => 'm3u8',
                 ]),
                 'm3u8',
+                null,
             ];
         }
 
-        return [null, null];
+        return [null, null, null];
     }
 
     /**

@@ -48,6 +48,7 @@
                 data-playlist-id="{{ $playlistId }}"
                 data-series-id="{{ $seriesId }}"
                 data-season-number="{{ $seasonNumber }}"
+                data-cast-unavailable-reason="{{ $castUnavailableReason ?? '' }}"
             >
                 <p class="p-4">Your browser does not support video playback.</p>
             </video>
@@ -224,6 +225,17 @@
                 });
 
                 container.style.display = '';
+
+                // Disable the cast button if no HLS profile is available
+                const castUnavailableReason = videoElement.dataset.castUnavailableReason || '';
+                const hasCastUrl = !!(videoElement.dataset.castUrl || @json($castUrl));
+                if (!hasCastUrl && castUnavailableReason) {
+                    btn.disabled = true;
+                    btn.classList.add('opacity-40', 'cursor-not-allowed');
+                    btn.classList.remove('hover:bg-white/20');
+                    btn.title = castUnavailableReason;
+                    label.textContent = castUnavailableReason;
+                }
 
                 context.addEventListener(
                     cast.framework.CastContextEventType.CAST_STATE_CHANGED,

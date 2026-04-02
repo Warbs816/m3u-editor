@@ -177,7 +177,7 @@ class Channel extends Model
             internal: true
         );
 
-        [$castUrl, $castFormat] = $this->getCastPlaybackAttributes($username, $password);
+        [$castUrl, $castFormat, $castUnavailableReason] = $this->getCastPlaybackAttributes($username, $password);
 
         return [
             'id' => $this->id,
@@ -190,6 +190,7 @@ class Channel extends Model
             'format' => $format,
             'cast_url' => $castUrl,
             'cast_format' => $castFormat,
+            'cast_unavailable_reason' => $castUnavailableReason,
             'type' => 'channel',
         ];
     }
@@ -197,6 +198,13 @@ class Channel extends Model
     protected function getCastPlaybackAttributes(?string $username = null, ?string $password = null): array
     {
         $castRoute = $this->is_vod ? 'cast.stream.movie' : 'cast.stream.live';
+
+        // VOD content requires HLS transcoding for Chromecast — check that an
+        // HLS profile is available before generating a cast URL.
+        if ($this->is_vod && ! self::hasHlsProfileForCasting()) {
+            return [null, null, 'No HLS transcoding profile configured'];
+        }
+
         $playlist = $this->playlist;
 
         if (! $playlist?->uuid) {
@@ -216,6 +224,7 @@ class Channel extends Model
                     'format' => 'm3u8',
                 ]),
                 'm3u8',
+                null,
             ];
         }
 
@@ -228,10 +237,49 @@ class Channel extends Model
                     'format' => 'm3u8',
                 ]),
                 'm3u8',
+                null,
             ];
         }
 
-        return [null, null];
+        return [null, null, null];
+    }
+
+    /**
+     * Check if the current user has any HLS profile available for casting.
+     * Checks cast-specific settings, in-app player settings, then any HLS profile.
+     */
+    public static function hasHlsProfileForCasting(): bool
+    {
+        $settings = app(GeneralSettings::class);
+
+        // Check cast-specific VOD profile
+        $profileId = $settings->default_cast_vod_stream_profile_id
+            ?? $settings->default_vod_stream_profile_id
+            ?? null;
+
+        if ($profileId) {
+            $profile = StreamProfile::find($profileId);
+            if ($profile && in_array(strtolower((string) $profile->format), ['hls', 'm3u8'], true)) {
+                return true;
+            }
+        }
+
+        // Check cast-specific live profile (may also be used)
+        $liveProfileId = $settings->default_cast_stream_profile_id
+            ?? $settings->default_stream_profile_id
+            ?? null;
+
+        if ($liveProfileId) {
+            $profile = StreamProfile::find($liveProfileId);
+            if ($profile && in_array(strtolower((string) $profile->format), ['hls', 'm3u8'], true)) {
+                return true;
+            }
+        }
+
+        // Fall back: any HLS profile owned by the user
+        return StreamProfile::where('user_id', auth()->id())
+            ->whereIn('format', ['hls', 'm3u8'])
+            ->exists();
     }
 
     /**

@@ -624,6 +624,9 @@ function epgViewer(config) {
                     if (Object.prototype.hasOwnProperty.call(updatedChannel, 'cast_format')) {
                         this.epgData.channels[foundChannelId].cast_format = updatedChannel.cast_format;
                     }
+                    if (Object.prototype.hasOwnProperty.call(updatedChannel, 'cast_unavailable_reason')) {
+                        this.epgData.channels[foundChannelId].cast_unavailable_reason = updatedChannel.cast_unavailable_reason;
+                    }
 
                     // Update programmes if provided
                     if (updatedChannel.programmes) {

@@ -359,6 +359,7 @@ class EpgApiController extends Controller
                     'format' => $channelFormat,
                     'cast_url' => $castUrl,
                     'cast_format' => $castFormat,
+                    'cast_unavailable_reason' => $channelResults['cast_unavailable_reason'] ?? null,
                     'tvg_id' => $tvgId,
                     'display_name' => $channel->title_custom ?? $channel->title,
                     'display_title' => $channelResults['display_title'] ?? $channel->title_custom ?? $channel->title ?? $channel->name_custom ?? $channel->name,
