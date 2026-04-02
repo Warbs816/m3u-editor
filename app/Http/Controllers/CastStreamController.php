@@ -170,12 +170,9 @@ class CastStreamController extends Controller
 
         $profile = $profileId ? StreamProfile::find($profileId) : null;
 
-        // If the resolved profile isn't HLS-compatible, try to find any HLS profile
-        // owned by the current user. Chromecast requires HLS for VOD/Series content.
-        if (! $profile || ! in_array(strtolower((string) $profile->format), ['hls', 'm3u8'], true)) {
-            $profile = StreamProfile::where('user_id', auth()->id())
-                ->whereIn('format', ['hls', 'm3u8'])
-                ->first();
+        // Only use profiles that are HLS-compatible — Chromecast cannot play MPEGTS or raw streams
+        if ($profile && ! in_array(strtolower((string) $profile->format), ['hls', 'm3u8'], true)) {
+            $profile = null;
         }
 
         if (! $profile) {

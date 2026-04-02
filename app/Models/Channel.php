@@ -245,14 +245,14 @@ class Channel extends Model
     }
 
     /**
-     * Check if the current user has any HLS profile available for casting.
-     * Checks cast-specific settings, in-app player settings, then any HLS profile.
+     * Check if an explicitly configured HLS profile is available for casting.
+     * Only considers profiles assigned in cast or in-app player settings.
      */
     public static function hasHlsProfileForCasting(): bool
     {
         $settings = app(GeneralSettings::class);
 
-        // Check cast-specific VOD profile
+        // Check cast-specific VOD profile, falling back to in-app VOD profile
         $profileId = $settings->default_cast_vod_stream_profile_id
             ?? $settings->default_vod_stream_profile_id
             ?? null;
@@ -264,7 +264,7 @@ class Channel extends Model
             }
         }
 
-        // Check cast-specific live profile (may also be used)
+        // Check cast-specific live profile, falling back to in-app live profile
         $liveProfileId = $settings->default_cast_stream_profile_id
             ?? $settings->default_stream_profile_id
             ?? null;
@@ -276,10 +276,7 @@ class Channel extends Model
             }
         }
 
-        // Fall back: any HLS profile owned by the user
-        return StreamProfile::where('user_id', auth()->id())
-            ->whereIn('format', ['hls', 'm3u8'])
-            ->exists();
+        return false;
     }
 
     /**
