@@ -157,26 +157,25 @@ class Channel extends Model
         }
         $profile = $profileId ? StreamProfile::find($profileId) : null;
 
+        // When no transcoding profile is set, the proxy delivers raw bytes (direct proxy),
+        // not an HLS manifest. For VOD channels, use the actual container extension for both
+        // the URL path and player format so the browser's <video> element handles the content.
+        // Live channels are unaffected as m3u8/ts are valid direct-proxy formats.
+        $internalFormat = null;
+        if (! $profile && $this->is_vod) {
+            $internalFormat = $this->container_extension ?? 'mkv';
+        }
+
         // Use the Xtream URL structure to preserve auth (username/password in URL).
         // Append ?player=true so XtreamStreamController routes this to the player
         // endpoint that applies the in-app transcoding profile.
         [$url, $format] = $this->getProxyUrl(
             withFormat: true,
-            profileFormat: $profile->format ?? null,
+            profileFormat: $profile->format ?? $internalFormat,
             username: $username,
             password: $password,
             internal: true
         );
-
-        // When no transcoding profile is set, the proxy delivers raw bytes (direct proxy),
-        // not an HLS manifest. If the URL-derived format is m3u8 but we have no profile
-        // and this is a VOD channel, use the actual container extension so the player picks
-        // the correct playback engine (native for mkv/mp4/etc.).
-        // For live channels, m3u8/ts are valid direct-proxy formats.
-        $playerFormat = $format;
-        if (! $profile && $this->is_vod && in_array($format, ['m3u8', 'ts'], true)) {
-            $playerFormat = $this->container_extension ?? 'mkv';
-        }
 
         return [
             'id' => $this->id,
@@ -185,7 +184,7 @@ class Channel extends Model
             'playlist_id' => $this->playlist_id,
             'title' => $this->name_custom ?? $this->name,
             'url' => $url,
-            'format' => $profile->format ?? $playerFormat,
+            'format' => $format,
             'type' => 'channel',
         ];
     }

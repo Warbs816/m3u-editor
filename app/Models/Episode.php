@@ -84,25 +84,25 @@ class Episode extends Model
         $profileId = $settings->default_vod_stream_profile_id ?? null;
         $profile = $profileId ? StreamProfile::find($profileId) : null;
 
+        // When no transcoding profile is set, the proxy delivers raw bytes (direct proxy),
+        // not an HLS manifest. Use the actual container extension for both the URL path
+        // and player format so the browser's <video> element can handle the content correctly.
+        // The Xtream route accepts any format via {format?}, so this is safe for routing.
+        $internalFormat = null;
+        if (! $profile) {
+            $internalFormat = $this->container_extension ?? 'mkv';
+        }
+
         // Use the Xtream URL structure to preserve auth (username/password in URL).
         // Append ?player=true so XtreamStreamController routes this to the player
         // endpoint that applies the in-app transcoding profile.
         [$url, $episodeFormat] = $this->getProxyUrl(
             withFormat: true,
-            profileFormat: $profile->format ?? null,
+            profileFormat: $profile->format ?? $internalFormat,
             username: $username,
             password: $password,
             internal: true
         );
-
-        // When no transcoding profile is set, the proxy delivers raw bytes (direct proxy),
-        // not an HLS manifest. If the URL-derived format is m3u8/ts but we have no profile,
-        // use the actual container extension so the player picks the correct playback engine
-        // (native for mkv/mp4/etc. instead of HLS.js which would fail on raw video data).
-        $playerFormat = $episodeFormat;
-        if (! $profile && in_array($episodeFormat, ['m3u8', 'ts'], true)) {
-            $playerFormat = $this->container_extension ?? 'mkv';
-        }
 
         return [
             'id' => 'episode-'.$this->id,
@@ -113,7 +113,7 @@ class Episode extends Model
             'season_number' => $this->season,
             'title' => $this->title,
             'url' => $url,
-            'format' => $profile->format ?? $playerFormat,
+            'format' => $episodeFormat,
             'type' => 'episode',
         ];
     }
