@@ -1223,6 +1223,49 @@ class EpgCacheService
     }
 
     /**
+     * Clear EPG file caches for all playlist types affected by a group channel recount.
+     *
+     * Uses the group's known playlist_id directly (skips loading channel IDs into PHP)
+     * and finds custom playlists via a JOIN on group_id.
+     */
+    public static function clearForGroup(int $groupId, int $playlistId): void
+    {
+        // Custom playlists that contain channels from this group
+        $customIds = DB::table('channel_custom_playlist as ccp')
+            ->join('channels as c', 'c.id', '=', 'ccp.channel_id')
+            ->where('c.group_id', $groupId)
+            ->distinct()
+            ->pluck('ccp.custom_playlist_id')
+            ->all();
+
+        // Merged playlists that include this source playlist
+        $mergedIds = DB::table('merged_playlist_playlist')
+            ->where('playlist_id', $playlistId)
+            ->distinct()
+            ->pluck('merged_playlist_id')
+            ->all();
+
+        // Aliases pointing to this source playlist or any affected custom playlist
+        $aliasIds = DB::table('playlist_aliases')
+            ->where(function ($q) use ($playlistId, $customIds): void {
+                $q->where('playlist_id', $playlistId);
+                if ($customIds) {
+                    $q->orWhereIn('custom_playlist_id', $customIds);
+                }
+            })
+            ->distinct()
+            ->pluck('id')
+            ->all();
+
+        self::bulkDeleteCacheFiles([
+            'playlists' => [$playlistId],
+            'custom_playlists' => $customIds,
+            'merged_playlists' => $mergedIds,
+            'playlist_aliases' => $aliasIds,
+        ]);
+    }
+
+    /**
      * Clear EPG file cache for a custom playlist and any playlist aliases pointing to it.
      * Used when pivot channel_number values change (custom playlist channel recount).
      */

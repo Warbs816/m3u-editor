@@ -78,39 +78,31 @@ class SortService
 
         if ($driver === 'mysql') {
             DB::statement('UPDATE channels c JOIN (SELECT id, ROW_NUMBER() OVER (ORDER BY sort) AS rn FROM channels WHERE group_id = ?) t ON c.id = t.id SET c.channel = t.rn + ?', [$record->id, $offset]);
-
-            return;
-        }
-
-        if (str_starts_with($driver, 'pgsql') || $driver === 'postgresql' || $driver === 'postgres') {
+        } elseif (str_starts_with($driver, 'pgsql') || $driver === 'postgresql' || $driver === 'postgres') {
             DB::statement('UPDATE channels SET channel = t.rn + ? FROM (SELECT id, ROW_NUMBER() OVER (ORDER BY sort) AS rn FROM channels WHERE group_id = ?) t WHERE channels.id = t.id', [$offset, $record->id]);
-
-            return;
-        }
-
-        if ($driver === 'sqlite') {
+        } elseif ($driver === 'sqlite') {
             DB::statement('WITH ranked AS (SELECT id, ROW_NUMBER() OVER (ORDER BY sort) AS rn FROM channels WHERE group_id = ?) UPDATE channels SET channel = (SELECT rn FROM ranked WHERE ranked.id = channels.id) + ? WHERE group_id = ?', [$record->id, $offset, $record->id]);
+        } else {
+            // Fallback: CASE update
+            $ids = $record->channels()->orderBy('sort')->pluck('id')->all();
+            if (empty($ids)) {
+                return;
+            }
 
-            return;
+            $cases = [];
+            $i = $start;
+            foreach ($ids as $id) {
+                $cases[] = "WHEN {$id} THEN {$i}";
+                $i++;
+            }
+
+            $casesSql = implode(' ', $cases);
+            $idsSql = implode(',', $ids);
+
+            DB::statement("UPDATE channels SET channel = CASE id {$casesSql} END WHERE id IN ({$idsSql})");
         }
 
-        // Fallback: CASE update
-        $ids = $record->channels()->orderBy('sort')->pluck('id')->all();
-        if (empty($ids)) {
-            return;
-        }
-
-        $cases = [];
-        $i = $start;
-        foreach ($ids as $id) {
-            $cases[] = "WHEN {$id} THEN {$i}";
-            $i++;
-        }
-
-        $casesSql = implode(' ', $cases);
-        $idsSql = implode(',', $ids);
-
-        DB::statement("UPDATE channels SET channel = CASE id {$casesSql} END WHERE id IN ({$idsSql})");
+        EpgCacheService::clearForGroup($record->id, $record->playlist_id);
     }
 
     public function bulkRecountChannels(Collection $channels, $start = 1): void
