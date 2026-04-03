@@ -215,7 +215,7 @@ class Channel extends Model
         // Note: playlist-level output transcoding settings (stream_profile_id /
         // vod_stream_profile_id) are for external clients only and are not
         // considered here.
-        if (! self::hasHlsProfileForCasting()) {
+        if (! self::hasHlsProfileForCasting($this->is_vod ? 'vod' : 'live')) {
             $sourceUrl = $this->url_custom ?: ($this->url ?? '');
             $sourceIsHls = (bool) preg_match('/\.m3u8($|\?)/i', $sourceUrl);
 
@@ -256,32 +256,38 @@ class Channel extends Model
     /**
      * Check if an explicitly configured HLS profile is available for casting.
      * Only considers profiles assigned in cast or in-app player settings.
+     *
+     * @param  string|null  $contentType  'live', 'vod', or null (check both)
      */
-    public static function hasHlsProfileForCasting(): bool
+    public static function hasHlsProfileForCasting(?string $contentType = null): bool
     {
         $settings = app(GeneralSettings::class);
 
         // Check cast-specific VOD profile, falling back to in-app VOD profile
-        $profileId = $settings->default_cast_vod_stream_profile_id
-            ?? $settings->default_vod_stream_profile_id
-            ?? null;
+        if ($contentType !== 'live') {
+            $profileId = $settings->default_cast_vod_stream_profile_id
+                ?? $settings->default_vod_stream_profile_id
+                ?? null;
 
-        if ($profileId) {
-            $profile = StreamProfile::find($profileId);
-            if ($profile && in_array(strtolower((string) $profile->format), ['hls', 'm3u8'], true)) {
-                return true;
+            if ($profileId) {
+                $profile = StreamProfile::find($profileId);
+                if ($profile && in_array(strtolower((string) $profile->format), ['hls', 'm3u8'], true)) {
+                    return true;
+                }
             }
         }
 
         // Check cast-specific live profile, falling back to in-app live profile
-        $liveProfileId = $settings->default_cast_stream_profile_id
-            ?? $settings->default_stream_profile_id
-            ?? null;
+        if ($contentType !== 'vod') {
+            $liveProfileId = $settings->default_cast_stream_profile_id
+                ?? $settings->default_stream_profile_id
+                ?? null;
 
-        if ($liveProfileId) {
-            $profile = StreamProfile::find($liveProfileId);
-            if ($profile && in_array(strtolower((string) $profile->format), ['hls', 'm3u8'], true)) {
-                return true;
+            if ($liveProfileId) {
+                $profile = StreamProfile::find($liveProfileId);
+                if ($profile && in_array(strtolower((string) $profile->format), ['hls', 'm3u8'], true)) {
+                    return true;
+                }
             }
         }
 

@@ -302,3 +302,27 @@ document.addEventListener('alpine:init', () => {
         },
     });
 });
+
+// Listen for direct-cast requests from table actions (no floating player involved).
+// Livewire dispatches this as a browser CustomEvent when the user clicks a table cast button.
+window.addEventListener('startDirectCast', (event) => {
+    let detail = event.detail;
+    if (Array.isArray(detail)) detail = detail[0];
+
+    const store = window.Alpine && Alpine.store('cast');
+    if (!store || !store.isReady) {
+        console.warn('[CastManager] Cast SDK not ready');
+        return;
+    }
+
+    const { cast_url, cast_format, title, content_type } = detail;
+    store.startCast(
+        cast_url,
+        cast_format || 'm3u8',
+        title || 'Stream',
+        null,  // logo
+        null,  // onBeforeCast — no local player to stop
+        null,  // onCastStopped — no local player to resume
+        content_type
+    );
+});

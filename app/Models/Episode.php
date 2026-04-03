@@ -133,7 +133,7 @@ class Episode extends Model
         //  2. The provider already serves HLS (episode URL ends in .m3u8)
         // Note: playlist-level output transcoding settings (vod_stream_profile_id)
         // are for external clients only and are not considered here.
-        if (! Channel::hasHlsProfileForCasting()) {
+        if (! Channel::hasHlsProfileForCasting('vod')) {
             $sourceIsHls = (bool) preg_match('/\.m3u8($|\?)/i', $this->url ?? '');
 
             if (! $sourceIsHls) {
