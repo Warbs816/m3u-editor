@@ -67,8 +67,9 @@ class M3uProxyApiController extends Controller
             $profile = $playlist->streamProfile;
         }
 
-        // Honor explicit profile_id override (e.g. from CastStreamController)
-        if (! $profile && $request->has('profile_id')) {
+        // Explicit profile_id overrides the playlist profile (e.g. CastStreamController
+        // sends an HLS profile that must take precedence over a playlist MPEGTS profile).
+        if ($request->has('profile_id')) {
             $profile = StreamProfile::find($request->input('profile_id'));
         }
 
@@ -119,8 +120,9 @@ class M3uProxyApiController extends Controller
         // For Series, use the VOD stream profile if set
         $profile = $playlist->vodStreamProfile;
 
-        // Honor explicit profile_id override (e.g. from CastStreamController)
-        if (! $profile && $request->has('profile_id')) {
+        // Explicit profile_id overrides the playlist profile (e.g. CastStreamController
+        // sends an HLS profile that must take precedence over a playlist MPEGTS profile).
+        if ($request->has('profile_id')) {
             $profile = StreamProfile::find($request->input('profile_id'));
         }
 

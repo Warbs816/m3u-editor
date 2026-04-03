@@ -199,12 +199,6 @@ class Channel extends Model
     {
         $castRoute = $this->is_vod ? 'cast.stream.movie' : 'cast.stream.live';
 
-        // VOD content requires HLS transcoding for Chromecast — check that an
-        // HLS profile is available before generating a cast URL.
-        if ($this->is_vod && ! self::hasHlsProfileForCasting()) {
-            return [null, null, 'No HLS transcoding profile configured'];
-        }
-
         $playlist = $this->playlist;
 
         if (! $playlist?->uuid) {
@@ -213,6 +207,21 @@ class Channel extends Model
 
         if (! $playlist?->uuid) {
             $playlist = Playlist::find($this->playlist_id ?: $this->custom_playlist_id);
+        }
+
+        // Chromecast requires HLS.  Casting is available when either:
+        //  1. A global cast/player HLS transcoding profile is configured, OR
+        //  2. The provider already serves HLS (channel URL ends in .m3u8)
+        // Note: playlist-level output transcoding settings (stream_profile_id /
+        // vod_stream_profile_id) are for external clients only and are not
+        // considered here.
+        if (! self::hasHlsProfileForCasting()) {
+            $sourceUrl = $this->url_custom ?: ($this->url ?? '');
+            $sourceIsHls = (bool) preg_match('/\.m3u8($|\?)/i', $sourceUrl);
+
+            if (! $sourceIsHls) {
+                return [null, null, 'No HLS transcoding profile configured'];
+            }
         }
 
         if ($username && $password) {

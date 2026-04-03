@@ -126,12 +126,20 @@ class Episode extends Model
 
     protected function getCastPlaybackAttributes(?string $username = null, ?string $password = null): array
     {
-        // Episodes always need HLS transcoding for Chromecast
-        if (! Channel::hasHlsProfileForCasting()) {
-            return [null, null, 'No HLS transcoding profile configured'];
-        }
-
         $playlist = $this->playlist ?? Playlist::find($this->playlist_id);
+
+        // Chromecast requires HLS.  Casting is available when either:
+        //  1. A global cast/player HLS transcoding profile is configured, OR
+        //  2. The provider already serves HLS (episode URL ends in .m3u8)
+        // Note: playlist-level output transcoding settings (vod_stream_profile_id)
+        // are for external clients only and are not considered here.
+        if (! Channel::hasHlsProfileForCasting()) {
+            $sourceIsHls = (bool) preg_match('/\.m3u8($|\?)/i', $this->url ?? '');
+
+            if (! $sourceIsHls) {
+                return [null, null, 'No HLS transcoding profile configured'];
+            }
+        }
 
         if ($username && $password) {
             return [
