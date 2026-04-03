@@ -84,12 +84,21 @@ class Episode extends Model
         $profileId = $settings->default_vod_stream_profile_id ?? null;
         $profile = $profileId ? StreamProfile::find($profileId) : null;
 
+        // When no transcoding profile is set, the proxy delivers raw bytes (direct proxy),
+        // not an HLS manifest. Use the actual container extension for both the URL path
+        // and player format so the browser's <video> element can handle the content correctly.
+        // The Xtream route accepts any format via {format?}, so this is safe for routing.
+        $internalFormat = null;
+        if (! $profile) {
+            $internalFormat = $this->container_extension ?? 'mkv';
+        }
+
         // Use the Xtream URL structure to preserve auth (username/password in URL).
         // Append ?player=true so XtreamStreamController routes this to the player
         // endpoint that applies the in-app transcoding profile.
         [$url, $episodeFormat] = $this->getProxyUrl(
             withFormat: true,
-            profileFormat: $profile->format ?? null,
+            profileFormat: $profile->format ?? $internalFormat,
             username: $username,
             password: $password,
             internal: true
