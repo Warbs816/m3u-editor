@@ -792,7 +792,7 @@ class Preferences extends SettingsPage
                                             ->helperText('The default transcoding profile used for the in-app player for VOD/Series content. Leave empty to disable transcoding (some streams may not be playable in the player).'),
                                     ]),
                                 Section::make('Casting Transcoding')
-                                    ->description('Select the transcoding profiles used when casting streams to a Chromecast or similar device. **Profiles must output HLS (m3u8) — Chromecast does not support MPEGTS or other formats.** If your provider already serves HLS streams, these can be left empty.')
+                                    ->description(new HtmlString('Select the transcoding profiles used when casting streams to a Chromecast or similar device. <strong>Profiles must output HLS (m3u8) — Chromecast does not support MPEGTS or other formats.</strong> If your provider already serves HLS streams, these can be left empty.'))
                                     ->columnSpanFull()
                                     ->columns(2)
                                     ->collapsible()
@@ -813,7 +813,7 @@ class Preferences extends SettingsPage
                                                     ->url('/stream-profiles')
                                                     ->openUrlInNewTab(false)
                                             )
-                                            ->helperText('The transcoding profile used when casting live streams. **Must be an HLS (m3u8) profile** — non-HLS profiles will be ignored. Leave empty to fall back to the in-app player profile.'),
+                                            ->helperText(new HtmlString('The transcoding profile used when casting live streams. <strong>Must be an HLS (m3u8) profile</strong> — non-HLS profiles will be ignored. Leave empty to fall back to the in-app player profile.')),
                                         Select::make('default_cast_vod_stream_profile_id')
                                             ->label('Cast VOD and Series Transcoding Profile')
                                             ->searchable()
@@ -829,7 +829,7 @@ class Preferences extends SettingsPage
                                                     ->url('/stream-profiles')
                                                     ->openUrlInNewTab(false)
                                             )
-                                            ->helperText('The transcoding profile used when casting VOD/Series streams. **Must be an HLS (m3u8) profile** — non-HLS profiles will be ignored. Leave empty to fall back to the in-app player profile.'),
+                                            ->helperText(new HtmlString('The transcoding profile used when casting VOD/Series streams. <strong>Must be an HLS (m3u8) profile</strong> — non-HLS profiles will be ignored. Leave empty to fall back to the in-app player profile.')),
                                     ]),
                                 Section::make('MediaFlow Proxy')
                                     ->description('If you have MediaFlow Proxy installed, you can use it to proxy your m3u editor playlist streams. When enabled, the app will auto-generate URLs for you to use via MediaFlow Proxy.')
