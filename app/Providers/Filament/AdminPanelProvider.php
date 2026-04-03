@@ -20,6 +20,7 @@ use App\Http\Middleware\DashboardMiddleware;
 use App\Http\Middleware\SeedLocaleFromUser;
 use App\Settings\GeneralSettings;
 use CraftForge\FilamentLanguageSwitcher\FilamentLanguageSwitcherPlugin;
+use EslamRedaDiv\FilamentCopilot\FilamentCopilotPlugin;
 use Exception;
 use Filament\Auth\MultiFactor\App\AppAuthentication;
 use Filament\Http\Middleware\Authenticate;
@@ -41,6 +42,7 @@ use Illuminate\Foundation\Http\Middleware\PreventRequestForgery;
 use Illuminate\Routing\Middleware\SubstituteBindings;
 use Illuminate\Session\Middleware\StartSession;
 use Illuminate\Support\Facades\Blade;
+use Illuminate\Support\Facades\Log;
 use Illuminate\View\Middleware\ShareErrorsFromSession;
 use ShuvroRoy\FilamentSpatieLaravelBackup\FilamentSpatieLaravelBackupPlugin;
 
@@ -146,7 +148,7 @@ class AdminPanelProvider extends PanelProvider
                 // SharedStreamStatsWidget::class,
                 // SystemHealthWidget::class,
             ])
-            ->plugins([
+            ->plugins(array_filter([
                 FilamentSpatieLaravelBackupPlugin::make()
                     ->authorize(fn (): bool => auth()->user()->isAdmin())
                     ->usingPage(Backups::class),
@@ -160,7 +162,8 @@ class AdminPanelProvider extends PanelProvider
                     ->showFlags(false)
                     ->rememberLocale()
                     ->showOnAuthPages(false),
-            ])
+                $this->buildCopilotPlugin(),
+            ]))
             ->maxContentWidth($settings['content_width'])
             ->middleware([
                 EncryptCookies::class,
@@ -226,5 +229,55 @@ class AdminPanelProvider extends PanelProvider
 
         // Return the configured panel
         return $adminPanel;
+    }
+
+    /**
+     * Build the Copilot plugin from database settings.
+     * Returns null when the plugin is disabled or not fully configured.
+     */
+    /** Default models used when the model field is left blank. */
+    private const COPILOT_DEFAULT_MODELS = [
+        'openai' => 'gpt-4o',
+        'anthropic' => 'claude-sonnet-4',
+        'gemini' => 'gemini-2.0-flash',
+        'mistral' => 'mistral-large-latest',
+        'ollama' => 'llama3',
+    ];
+
+    /**
+     * Build the Copilot plugin from database settings.
+     * Returns null when the plugin is disabled or not fully configured.
+     */
+    private function buildCopilotPlugin(): ?FilamentCopilotPlugin
+    {
+        try {
+            $s = app(GeneralSettings::class);
+
+            $isConfigured = $s->copilot_enabled
+                && ! empty($s->copilot_provider)
+                && (! empty($s->copilot_api_key) || $s->copilot_provider === 'ollama');
+
+            if (! $isConfigured) {
+                return null;
+            }
+
+            $model = $s->copilot_model
+                ?: (self::COPILOT_DEFAULT_MODELS[$s->copilot_provider] ?? 'gpt-4o');
+
+            return FilamentCopilotPlugin::make()
+                ->provider($s->copilot_provider)
+                ->model($model)
+                ->systemPrompt($s->copilot_system_prompt ?: 'You are a helpful AI assistant integrated into m3u editor. You help users manage playlists, EPG data, streams, channels, and other media features. Be concise and accurate.')
+                ->globalTools($s->copilot_global_tools ?? [])
+                ->quickActions(array_values($s->copilot_quick_actions ?? []))
+                ->managementEnabled()
+                ->managementGuard('admin')
+                ->respectAuthorization()
+                ->authorizeUsing(fn ($user) => $user->isAdmin());
+        } catch (Exception $e) {
+            Log::error('Failed to build Filament Copilot plugin', ['exception' => $e]);
+
+            return null;
+        }
     }
 }

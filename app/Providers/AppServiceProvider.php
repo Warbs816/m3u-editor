@@ -149,6 +149,9 @@ class AppServiceProvider extends ServiceProvider
         // Apply user-defined timezone (when TZ env var is not set)
         $this->applyTimezoneFromSettings();
 
+        // Inject Copilot API key from settings into the Laravel AI config
+        $this->applyCopilotApiKeyFromSettings();
+
         // Register the OIDC Socialite driver (when enabled)
         $this->registerOidcProvider();
 
@@ -811,6 +814,25 @@ class AppServiceProvider extends ServiceProvider
                     SecurityScheme::http('bearer')
                 );
             });
+    }
+
+    /**
+     * Inject the Copilot API key stored in GeneralSettings into the Laravel AI
+     * provider config so it takes effect at request time without requiring an
+     * env var to be set. This runs after settings are available and before any
+     * AI requests are made.
+     */
+    private function applyCopilotApiKeyFromSettings(): void
+    {
+        try {
+            $settings = app(GeneralSettings::class);
+
+            if (! empty($settings->copilot_api_key) && ! empty($settings->copilot_provider)) {
+                config(["ai.providers.{$settings->copilot_provider}.key" => $settings->copilot_api_key]);
+            }
+        } catch (Throwable) {
+            // Settings may not be available during fresh installs / migrations
+        }
     }
 
     /**
