@@ -42,7 +42,6 @@ use Illuminate\Foundation\Http\Middleware\PreventRequestForgery;
 use Illuminate\Routing\Middleware\SubstituteBindings;
 use Illuminate\Session\Middleware\StartSession;
 use Illuminate\Support\Facades\Blade;
-use Illuminate\Support\Facades\Log;
 use Illuminate\View\Middleware\ShareErrorsFromSession;
 use ShuvroRoy\FilamentSpatieLaravelBackup\FilamentSpatieLaravelBackupPlugin;
 
@@ -250,6 +249,12 @@ class AdminPanelProvider extends PanelProvider
      */
     private function buildCopilotPlugin(): ?FilamentCopilotPlugin
     {
+        // Skip during tests — the settings table is not yet created when panel() runs
+        // (RefreshDatabase migrations happen after service provider registration).
+        if (app()->environment('testing')) {
+            return null;
+        }
+
         try {
             $s = app(GeneralSettings::class);
 
@@ -274,8 +279,7 @@ class AdminPanelProvider extends PanelProvider
                 ->managementGuard('admin')
                 ->respectAuthorization()
                 ->authorizeUsing(fn ($user) => $user->isAdmin());
-        } catch (Exception $e) {
-            Log::error('Failed to build Filament Copilot plugin', ['exception' => $e]);
+        } catch (Throwable) {
 
             return null;
         }
