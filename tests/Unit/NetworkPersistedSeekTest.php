@@ -5,6 +5,8 @@ use App\Models\NetworkProgramme;
 use Illuminate\Support\Carbon;
 
 it('calculates persisted broadcast seek correctly', function () {
+    Carbon::setTestNow(Carbon::now());
+
     $network = Network::factory()->create();
 
     $programme = NetworkProgramme::factory()->create([
@@ -26,4 +28,6 @@ it('calculates persisted broadcast seek correctly', function () {
     // Expect initial 120 + 30 elapsed = 150 seconds
     expect($seek)->toBeInt();
     expect($seek)->toBe(150);
+
+    Carbon::setTestNow();
 });
