@@ -221,7 +221,11 @@ class XtreamStreamController extends Controller
             if ($channel->shouldProxy($playlist) || $request->input('proxy') === 'true') {
                 $request->merge(['username' => $username]);
 
-                return app()->call('App\\Http\\Controllers\\Api\\M3uProxyApiController@channel', [
+                // player=true signals an in-app player request — route to channelPlayer
+                // so the in-app transcoding profile is applied instead of the playlist profile
+                $method = $request->input('player') === 'true' ? 'channelPlayer' : 'channel';
+
+                return app()->call("App\\Http\\Controllers\\Api\\M3uProxyApiController@{$method}", [
                     'id' => $streamId,
                     'uuid' => $playlist->uuid,
                 ]);
@@ -265,7 +269,10 @@ class XtreamStreamController extends Controller
                 // Add username to request for proxy traceability
                 $request->merge(['username' => $username]);
 
-                return app()->call('App\\Http\\Controllers\\Api\\M3uProxyApiController@channel', [
+                // player=true signals an in-app player request — apply in-app transcoding profile
+                $method = $request->input('player') === 'true' ? 'channelPlayer' : 'channel';
+
+                return app()->call("App\\Http\\Controllers\\Api\\M3uProxyApiController@{$method}", [
                     'id' => $streamId,
                     'uuid' => $playlist->uuid,
                 ]);
@@ -294,7 +301,10 @@ class XtreamStreamController extends Controller
                 // Add username to request for proxy traceability
                 $request->merge(['username' => $username]);
 
-                return app()->call('App\\Http\\Controllers\\Api\\M3uProxyApiController@episode', [
+                // player=true signals an in-app player request — apply in-app transcoding profile
+                $method = $request->input('player') === 'true' ? 'episodePlayer' : 'episode';
+
+                return app()->call("App\\Http\\Controllers\\Api\\M3uProxyApiController@{$method}", [
                     'id' => $streamId,
                     'uuid' => $playlist->uuid,
                 ]);

@@ -61,12 +61,21 @@ class ProcessVodChannelsComplete implements ShouldQueue
             Log::info('VOD Complete: Queuing bulk TMDB fetch for playlist ID '.$this->playlist->id);
             $postJobs[] = new FetchTmdbIds(
                 vodPlaylistId: $this->playlist->id,
+                user: $this->playlist->user,
                 sendCompletionNotification: false,
             );
         }
 
         if ($this->playlist->auto_sync_vod_stream_files) {
             Log::info('VOD Complete: Queuing STRM sync for playlist ID '.$this->playlist->id);
+            $hasFindReplaceRules = collect($this->playlist->find_replace_rules ?? [])
+                ->contains(fn (array $rule): bool => $rule['enabled'] ?? false);
+            if ($hasFindReplaceRules) {
+                // Find & Replace runs concurrently with VOD metadata fetch (dispatched by
+                // SyncListener). Chain it here too so STRM sync is guaranteed to use
+                // the processed title_custom values, not stale ones.
+                $postJobs[] = new RunPlaylistFindReplaceRules($this->playlist);
+            }
             $postJobs[] = new SyncVodStrmFiles(
                 playlist: $this->playlist,
             );

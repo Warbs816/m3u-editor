@@ -281,7 +281,7 @@ class FetchTmdbIds implements ShouldQueue
         // Use playlist-based filtering if provided
         if ($this->vodPlaylistId) {
             $query->where('playlist_id', $this->vodPlaylistId)
-                ->where('user_id', $this->user?->id)
+                ->when($this->user, fn ($q) => $q->where('user_id', $this->user->id))
                 ->where('enabled', true);
         } elseif ($this->allVodPlaylists && $this->user) {
             $query->whereHas('playlist', function ($q) {
@@ -308,7 +308,7 @@ class FetchTmdbIds implements ShouldQueue
         // Use playlist-based filtering if provided
         if ($this->seriesPlaylistId) {
             $query->where('playlist_id', $this->seriesPlaylistId)
-                ->where('user_id', $this->user?->id)
+                ->when($this->user, fn ($q) => $q->where('user_id', $this->user->id))
                 ->where('enabled', true);
         } elseif ($this->allSeriesPlaylists && $this->user) {
             $query->where('user_id', $this->user->id)
@@ -519,8 +519,8 @@ class FetchTmdbIds implements ShouldQueue
                     $info['plot'] = $details['overview'];
                 }
 
-                // Populate genre if not already set (treat 'Uncategorized' and first-fetch as empty)
-                if (! empty($details['genres']) && (empty($info['genre']) || ($info['genre'] ?? '') === 'Uncategorized' || $channel->last_metadata_fetch === null)) {
+                // Populate genre if not already set (treat 'Uncategorized' as empty)
+                if (! empty($details['genres']) && (empty($info['genre']) || ($info['genre'] ?? '') === 'Uncategorized')) {
                     $info['genre'] = $details['genres'];
 
                     // Update the channel's group to match the primary TMDB genre
@@ -528,21 +528,23 @@ class FetchTmdbIds implements ShouldQueue
                         ? explode(', ', $details['genres'])[0]
                         : (is_array($details['genres']) ? $details['genres'][0] : null);
 
-                    if ($primaryGenre && ($channel->group === 'Uncategorized' || $channel->group_internal === 'Uncategorized' || $channel->last_metadata_fetch === null)) {
-                        $group = Group::firstOrCreate(
-                            [
-                                'playlist_id' => $channel->playlist_id,
-                                'name' => $primaryGenre,
-                            ],
-                            [
-                                'name_internal' => $primaryGenre,
-                                'user_id' => $channel->user_id,
-                                'type' => 'vod',
-                            ]
-                        );
-                        $updateData['group'] = $primaryGenre;
-                        $updateData['group_internal'] = $primaryGenre;
-                        $updateData['group_id'] = $group->id;
+                    if ($primaryGenre) {
+                        if (empty($channel->group) || $channel->group === 'Uncategorized' || $channel->group_internal === 'Uncategorized') {
+                            $group = Group::firstOrCreate(
+                                [
+                                    'playlist_id' => $channel->playlist_id,
+                                    'name' => $primaryGenre,
+                                ],
+                                [
+                                    'name_internal' => $primaryGenre,
+                                    'user_id' => $channel->user_id,
+                                    'type' => 'vod',
+                                ]
+                            );
+                            $updateData['group'] = $primaryGenre;
+                            $updateData['group_internal'] = $primaryGenre;
+                            $updateData['group_id'] = $group->id;
+                        }
                     }
                 }
 
@@ -850,18 +852,23 @@ class FetchTmdbIds implements ShouldQueue
                     $updateData['plot'] = $details['overview'];
                 }
 
-                // Populate genre if not already set (treat 'Uncategorized' and first-fetch as empty)
-                if (! empty($details['genres']) && (empty($series->genre) || ($series->genre ?? '') === 'Uncategorized' || $series->last_metadata_fetch === null)) {
-                    $updateData['genre'] = $details['genres'];
+                // Populate genre if not already set (treat 'Uncategorized' as empty)
+                if (! empty($details['genres'])) {
+                    if (empty($series->genre) || ($series->genre ?? '') === 'Uncategorized') {
+                        $updateData['genre'] = $details['genres'];
+                    }
+                }
 
-                    // Update the series' category to match the primary TMDB genre
+                // Update the series' category when it is missing or Uncategorized.
+                if (! empty($details['genres'])) {
                     $primaryGenre = is_string($details['genres'])
                         ? explode(', ', $details['genres'])[0]
                         : (is_array($details['genres']) ? $details['genres'][0] : null);
 
                     if ($primaryGenre) {
                         $currentCategory = $series->category_id ? Category::find($series->category_id) : null;
-                        if (! $currentCategory || $currentCategory->name === 'Uncategorized' || $series->last_metadata_fetch === null) {
+
+                        if (! $currentCategory || $currentCategory->name === 'Uncategorized') {
                             $category = Category::firstOrCreate(
                                 [
                                     'playlist_id' => $series->playlist_id,

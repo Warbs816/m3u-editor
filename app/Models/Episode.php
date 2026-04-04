@@ -84,13 +84,24 @@ class Episode extends Model
         $profileId = $settings->default_vod_stream_profile_id ?? null;
         $profile = $profileId ? StreamProfile::find($profileId) : null;
 
-        // Always proxy the internal player so we can attempt to transcode the stream for better compatibility
-        // This also prevents CORS and mixed-content issues
+        // When no transcoding profile is set, the proxy delivers raw bytes (direct proxy),
+        // not an HLS manifest. Use the actual container extension for both the URL path
+        // and player format so the browser's <video> element can handle the content correctly.
+        // The Xtream route accepts any format via {format?}, so this is safe for routing.
+        $internalFormat = null;
+        if (! $profile) {
+            $internalFormat = $this->container_extension ?? 'mkv';
+        }
+
+        // Use the Xtream URL structure to preserve auth (username/password in URL).
+        // Append ?player=true so XtreamStreamController routes this to the player
+        // endpoint that applies the in-app transcoding profile.
         [$url, $episodeFormat] = $this->getProxyUrl(
             withFormat: true,
-            profileFormat: $profile->format ?? null,
+            profileFormat: $profile->format ?? $internalFormat,
             username: $username,
-            password: $password
+            password: $password,
+            internal: true
         );
 
         return [
@@ -112,7 +123,7 @@ class Episode extends Model
      *
      * @var string|array
      */
-    public function getProxyUrl(?bool $withFormat = false, ?string $profileFormat = null, ?string $username = null, ?string $password = null)
+    public function getProxyUrl(?bool $withFormat = false, ?string $profileFormat = null, ?string $username = null, ?string $password = null, bool $internal = false)
     {
         // Load the effective playlist to determine proxy settings and get UUID for authentication
         $playlist = Playlist::find($this->playlist_id);
@@ -149,14 +160,24 @@ class Episode extends Model
             $password = urlencode($playlist->uuid);
         }
 
-        // Always proxy the internal proxy so we can attempt to transcode the stream for better compatibility
-        // This also prevents CORS and mixed-content issues
-        $url = rtrim(PlaylistService::getBaseUrl("/series/{$username}/{$password}/".$this->id.'.'.$episodeFormat), '.');
+        // Build the proxy URL path
+        $path = "/series/{$username}/{$password}/".$this->id.'.'.$episodeFormat;
+
+        // Use relative URL for internal (in-app) players to prevent CORS and mixed-content issues
+        if ($internal) {
+            $url = rtrim($path, '.');
+        } else {
+            $url = rtrim(PlaylistService::getBaseUrl($path), '.');
+        }
 
         // Append query parameter so our Xtream Stream controller knows to proxy the stream regardless of playlist settings
-        $url .= '?'.http_build_query([
+        $queryArgs = [
             'proxy' => 'true',
-        ]);
+        ];
+        if ($internal) {
+            $queryArgs['player'] = 'true';
+        }
+        $url .= '?'.http_build_query($queryArgs);
 
         return $withFormat ? [$url, $episodeFormat] : $url;
     }

@@ -38,7 +38,7 @@ class M3uProxyService
 
     public function __construct()
     {
-        $this->apiBaseUrl = rtrim(config('proxy.m3u_proxy_host'), '/');
+        $this->apiBaseUrl = rtrim(config('proxy.m3u_proxy_host', ''), '/');
         if ($port = config('proxy.m3u_proxy_port')) {
             $this->apiBaseUrl .= ':'.$port;
         }
@@ -699,6 +699,11 @@ class M3uProxyService
         $selectedProfile = null;
         $reservationId = null;
 
+        // Timeshift/catchup requests require a different upstream URL (/timeshift/ instead of /live/),
+        // so they must NEVER reuse an existing pooled live stream. We detect this early and skip
+        // all pool reuse paths when timeshift parameters are present on the request.
+        $isTimeshiftRequest = $request && ($request->filled('timeshift_duration') || $request->filled('timeshift_date') || $request->filled('utc'));
+
         if ($profile) {
             // Search for pooled stream by ORIGINAL channel ID (handles cross-provider failovers).
             // Pass NULL for provider_profile_id to search across ALL profiles.
@@ -706,7 +711,7 @@ class M3uProxyService
             // active stream (e.g. after a proxy restart), the stale key is cleared below.
             $existingStreamId = $this->findExistingPooledStream($originalChannelId, $originalPlaylistUuid, $profile->id, null);
 
-            if ($existingStreamId) {
+            if ($existingStreamId && ! $isTimeshiftRequest) {
                 Log::debug('Reusing existing pooled transcoded stream (bypassing capacity check)', [
                     'stream_id' => $existingStreamId,
                     'original_channel_id' => $originalChannelId,
@@ -716,6 +721,13 @@ class M3uProxyService
                 ]);
 
                 return $this->buildTranscodeStreamUrl($existingStreamId, $profile->format ?? 'ts', $username);
+            } elseif ($existingStreamId && $isTimeshiftRequest) {
+                Log::debug('Skipping pool reuse for timeshift request (requires different upstream URL)', [
+                    'stream_id' => $existingStreamId,
+                    'original_channel_id' => $originalChannelId,
+                    'original_playlist_uuid' => $originalPlaylistUuid,
+                    'profile_id' => $profile->id,
+                ]);
             }
 
             // If Redis has a channel stream key but the proxy returned no active stream above,
@@ -742,7 +754,7 @@ class M3uProxyService
                     if (ProfileService::isChannelStreamActive($originalChannelId, $originalPlaylistUuid)) {
                         $existingStreamId = $this->findExistingPooledStream($originalChannelId, $originalPlaylistUuid, $profile->id, null);
 
-                        if ($existingStreamId) {
+                        if ($existingStreamId && ! $isTimeshiftRequest) {
                             return $this->buildTranscodeStreamUrl($existingStreamId, $profile->format ?? 'ts', $username);
                         }
 
@@ -782,7 +794,7 @@ class M3uProxyService
         if (! $profile) {
             $existingStreamId = $this->findExistingPooledStream($originalChannelId, $originalPlaylistUuid, null, null);
 
-            if ($existingStreamId) {
+            if ($existingStreamId && ! $isTimeshiftRequest) {
                 Log::debug('Reusing existing pooled direct stream (bypassing capacity check)', [
                     'stream_id' => $existingStreamId,
                     'original_channel_id' => $originalChannelId,
@@ -793,7 +805,18 @@ class M3uProxyService
                 $url = PlaylistUrlService::getChannelUrl($channel, $playlist);
                 $format = $this->getFormatFromUrl($url);
 
+                // VOD channels: force /stream/ endpoint (see comment in direct stream creation path)
+                if (($channel->is_vod ?? false) && ($format === 'hls' || $format === 'm3u8')) {
+                    $format = 'raw';
+                }
+
                 return $this->buildProxyUrl($existingStreamId, $format, $username);
+            } elseif ($existingStreamId && $isTimeshiftRequest) {
+                Log::debug('Skipping pool reuse for timeshift request (requires different upstream URL)', [
+                    'stream_id' => $existingStreamId,
+                    'original_channel_id' => $originalChannelId,
+                    'original_playlist_uuid' => $originalPlaylistUuid,
+                ]);
             }
 
             // If Redis has a channel stream key but the proxy returned no active stream above,
@@ -910,7 +933,7 @@ class M3uProxyService
                     $existingStreamId = ProfileService::getChannelActiveStreamId($originalChannelId, $originalPlaylistUuid)
                         ?? $this->findExistingPooledStream($originalChannelId, $originalPlaylistUuid, null, null);
 
-                    if ($existingStreamId) {
+                    if ($existingStreamId && ! $isTimeshiftRequest) {
                         $activeChannelStreams = self::getActiveStreamsCountByMetadata('original_channel_id', (string) $originalChannelId);
 
                         if ($activeChannelStreams > 0) {
@@ -1115,6 +1138,13 @@ class M3uProxyService
             // Get the format from the URL
             $format = $this->getFormatFromUrl($primaryUrl);
 
+            // For VOD channels, direct (non-transcoded) streams should always use the /stream/
+            // endpoint. Xtream VOD source URLs may end in .m3u8 but createStream() proxies raw
+            // bytes, not an HLS manifest. Live channels genuinely use HLS so their format is kept.
+            if (($actualChannel->is_vod ?? false) && ($format === 'hls' || $format === 'm3u8')) {
+                $format = 'raw';
+            }
+
             // Return the direct proxy URL using the stream ID
             return $this->buildProxyUrl($streamId, $format, $username);
         }
@@ -1228,6 +1258,9 @@ class M3uProxyService
                         }
 
                         $format = $this->getFormatFromUrl($url);
+                        if ($format === 'hls' || $format === 'm3u8') {
+                            $format = 'raw';
+                        }
 
                         return $this->buildProxyUrl($existingStreamId, $format, $username);
                     }
@@ -1366,8 +1399,14 @@ class M3uProxyService
                 ProfileService::finalizeReservation($selectedProfile, $reservationId, $streamId);
             }
 
-            // Get the format from the URL
+            // For direct (non-transcoded) streams, always use the /stream/ endpoint.
+            // The source URL may have an .m3u8 extension (common for Xtream episode URLs),
+            // but createStream() proxies raw bytes — not an HLS manifest — so we must
+            // avoid buildProxyUrl routing to the /hls/ endpoint.
             $format = $this->getFormatFromUrl($url);
+            if ($format === 'hls' || $format === 'm3u8') {
+                $format = 'raw';
+            }
 
             // Return the direct proxy URL using the stream ID
             return $this->buildProxyUrl($streamId, $format, $username);

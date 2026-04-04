@@ -5,6 +5,7 @@ namespace App\Jobs;
 use App\Models\Playlist;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
+use Illuminate\Support\Facades\Bus;
 
 class ProcessM3uImportVod implements ShouldQueue
 {
@@ -39,7 +40,19 @@ class ProcessM3uImportVod implements ShouldQueue
         } elseif ($playlist->auto_sync_vod_stream_files) {
             // No metadata fetch, but stream file sync was requested. Dispatch directly since
             // ProcessVodChannelsComplete won't run (no metadata chain).
-            dispatch(new SyncVodStrmFiles(playlist: $playlist));
+            $hasFindReplaceRules = collect($playlist->find_replace_rules ?? [])
+                ->contains(fn (array $rule): bool => $rule['enabled'] ?? false);
+            if ($hasFindReplaceRules) {
+                // Chain Find & Replace before STRM sync so filenames use processed titles.
+                // SyncListener also dispatches Find & Replace concurrently; the second run
+                // is a no-op since rules won't match already-processed title_custom values.
+                Bus::chain([
+                    new RunPlaylistFindReplaceRules($playlist),
+                    new SyncVodStrmFiles(playlist: $playlist),
+                ])->dispatch();
+            } else {
+                dispatch(new SyncVodStrmFiles(playlist: $playlist));
+            }
         }
 
         // All done! Nothing else to do ;)

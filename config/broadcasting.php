@@ -15,7 +15,7 @@ return [
     |
     */
 
-    'default' => 'reverb', // env('BROADCAST_CONNECTION', 'null'),
+    'default' => 'reverb', // DON'T CHANGE THIS VALUE --- it is required for the app to work correctly
 
     /*
     |--------------------------------------------------------------------------
