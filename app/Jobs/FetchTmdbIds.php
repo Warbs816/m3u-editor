@@ -528,21 +528,35 @@ class FetchTmdbIds implements ShouldQueue
                         ? explode(', ', $details['genres'])[0]
                         : (is_array($details['genres']) ? $details['genres'][0] : null);
 
-                    if ($primaryGenre && (empty($channel->group) || $channel->group === 'Uncategorized' || $channel->group_internal === 'Uncategorized')) {
-                        $group = Group::firstOrCreate(
-                            [
-                                'playlist_id' => $channel->playlist_id,
-                                'name' => $primaryGenre,
-                            ],
-                            [
-                                'name_internal' => $primaryGenre,
-                                'user_id' => $channel->user_id,
-                                'type' => 'vod',
-                            ]
-                        );
-                        $updateData['group'] = $primaryGenre;
-                        $updateData['group_internal'] = $primaryGenre;
-                        $updateData['group_id'] = $group->id;
+                    if ($primaryGenre) {
+                        // Build TMDB genre list to detect library folder names.
+                        // A group is treated as a library folder name (and eligible for replacement)
+                        // if it does not appear in the TMDB genre list — e.g. "Movies", "TV Shows".
+                        // A group that already matches a TMDB genre (e.g. "Action") is preserved.
+                        $tmdbGenreList = is_string($details['genres'])
+                            ? array_map('trim', explode(',', $details['genres']))
+                            : (array) $details['genres'];
+
+                        $groupIsLibraryName = ! empty($channel->group)
+                            && ! str_contains($channel->group, ',')
+                            && ! in_array(trim($channel->group), $tmdbGenreList);
+
+                        if (empty($channel->group) || $channel->group === 'Uncategorized' || $channel->group_internal === 'Uncategorized' || $groupIsLibraryName) {
+                            $group = Group::firstOrCreate(
+                                [
+                                    'playlist_id' => $channel->playlist_id,
+                                    'name' => $primaryGenre,
+                                ],
+                                [
+                                    'name_internal' => $primaryGenre,
+                                    'user_id' => $channel->user_id,
+                                    'type' => 'vod',
+                                ]
+                            );
+                            $updateData['group'] = $primaryGenre;
+                            $updateData['group_internal'] = $primaryGenre;
+                            $updateData['group_id'] = $group->id;
+                        }
                     }
                 }
 
@@ -861,7 +875,19 @@ class FetchTmdbIds implements ShouldQueue
 
                     if ($primaryGenre) {
                         $currentCategory = $series->category_id ? Category::find($series->category_id) : null;
-                        if (! $currentCategory || $currentCategory->name === 'Uncategorized') {
+
+                        // Build TMDB genre list to detect library folder names.
+                        // Replace the category only when it's missing, Uncategorized, or looks
+                        // like a library folder name (not found in the TMDB genre list).
+                        $tmdbGenreList = is_string($details['genres'])
+                            ? array_map('trim', explode(',', $details['genres']))
+                            : (array) $details['genres'];
+
+                        $categoryIsLibraryName = $currentCategory
+                            && ! str_contains($currentCategory->name, ',')
+                            && ! in_array(trim($currentCategory->name), $tmdbGenreList);
+
+                        if (! $currentCategory || $currentCategory->name === 'Uncategorized' || $categoryIsLibraryName) {
                             $category = Category::firstOrCreate(
                                 [
                                     'playlist_id' => $series->playlist_id,
