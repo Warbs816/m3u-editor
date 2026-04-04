@@ -12,13 +12,6 @@ class PluginRunLog extends Model
 
     protected $table = 'extension_plugin_run_logs';
 
-    protected $fillable = [
-        'extension_plugin_run_id',
-        'level',
-        'message',
-        'context',
-    ];
-
     protected $casts = [
         'context' => 'array',
     ];

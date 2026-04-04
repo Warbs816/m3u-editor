@@ -16,30 +16,6 @@ class PluginRun extends Model
 
     protected $table = 'extension_plugin_runs';
 
-    protected $fillable = [
-        'extension_plugin_id',
-        'user_id',
-        'trigger',
-        'invocation_type',
-        'action',
-        'hook',
-        'dry_run',
-        'status',
-        'payload',
-        'result',
-        'run_state',
-        'summary',
-        'progress',
-        'progress_message',
-        'started_at',
-        'finished_at',
-        'last_heartbeat_at',
-        'cancel_requested',
-        'cancel_requested_at',
-        'cancelled_at',
-        'stale_at',
-    ];
-
     protected $casts = [
         'payload' => 'array',
         'result' => 'array',
