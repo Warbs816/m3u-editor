@@ -4,6 +4,7 @@ namespace App\Jobs;
 
 use App\Models\Channel;
 use App\Models\Playlist;
+use App\Traits\ProviderRequestDelay;
 use Filament\Notifications\Notification;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
@@ -11,7 +12,7 @@ use Illuminate\Support\Facades\Log;
 
 class ProbeChannelStreams implements ShouldQueue
 {
-    use Queueable;
+    use ProviderRequestDelay, Queueable;
 
     public $tries = 1;
 
@@ -59,7 +60,7 @@ class ProbeChannelStreams implements ShouldQueue
 
         foreach ($channels->chunk($this->concurrency) as $chunk) {
             foreach ($chunk as $channel) {
-                $stats = $channel->probeStreamStats();
+                $stats = $this->withProviderThrottling(fn () => $channel->ensureStreamStats());
 
                 if (! empty($stats)) {
                     $channel->updateQuietly([
