@@ -867,8 +867,11 @@ class FetchTmdbIds implements ShouldQueue
                 // Populate genre if not already set (treat 'Uncategorized' as empty)
                 if (! empty($details['genres']) && (empty($series->genre) || ($series->genre ?? '') === 'Uncategorized')) {
                     $updateData['genre'] = $details['genres'];
+                }
 
-                    // Update the series' category to match the primary TMDB genre
+                // Update the series' category when it is missing, Uncategorized, or looks like
+                // a library folder name (not found in the TMDB genre list for this title).
+                if (! empty($details['genres'])) {
                     $primaryGenre = is_string($details['genres'])
                         ? explode(', ', $details['genres'])[0]
                         : (is_array($details['genres']) ? $details['genres'][0] : null);
@@ -876,9 +879,6 @@ class FetchTmdbIds implements ShouldQueue
                     if ($primaryGenre) {
                         $currentCategory = $series->category_id ? Category::find($series->category_id) : null;
 
-                        // Build TMDB genre list to detect library folder names.
-                        // Replace the category only when it's missing, Uncategorized, or looks
-                        // like a library folder name (not found in the TMDB genre list).
                         $tmdbGenreList = is_string($details['genres'])
                             ? array_map('trim', explode(',', $details['genres']))
                             : (array) $details['genres'];
