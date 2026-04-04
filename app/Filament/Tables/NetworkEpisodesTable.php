@@ -21,7 +21,7 @@ class NetworkEpisodesTable
             ->modifyQueryUsing(function (Builder $query) use ($table): Builder {
                 $arguments = $table->getArguments();
 
-                $query->with(['series', 'season', 'playlist']);
+                $query->with(['series.category', 'season', 'playlist']);
 
                 if ($playlistId = $arguments['playlist_id'] ?? null) {
                     $query->where('playlist_id', $playlistId);
