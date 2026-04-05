@@ -19,6 +19,7 @@ import './vendor/stream-viewer'
 import './vendor/multi-stream-manager'
 import './vendor/schedule-builder'
 import './vendor/cast-manager'
+import './vendor/airplay-manager'
 
 // Fix broken images
 document.addEventListener('error', event => {

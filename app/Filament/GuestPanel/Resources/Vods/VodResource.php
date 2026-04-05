@@ -240,12 +240,7 @@ class VodResource extends Resource
                         if (! ($attrs['cast_url'] ?? null)) {
                             return;
                         }
-                        $livewire->dispatch('startDirectCast', [
-                            'cast_url' => $attrs['cast_url'],
-                            'cast_format' => $attrs['cast_format'],
-                            'title' => $attrs['display_title'] ?? $attrs['title'] ?? $record->name,
-                            'content_type' => $attrs['content_type'] ?? 'vod',
-                        ]);
+                        $livewire->dispatch('startDirectCast', $attrs);
                     })
                     ->icon('svg-chromecast')
                     ->button()

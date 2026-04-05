@@ -229,6 +229,10 @@ function streamPlayer() {
                     console.log('Initializing native player');
                     this.initNativePlayer(video, url, playerId);
                 }
+                // Attach to AirPlay manager for device detection (all stream types)
+                if (window.Alpine && Alpine.store('airplay') && Alpine.store('airplay').isSupported) {
+                    Alpine.store('airplay').attachToVideo(video);
+                }
             } catch (error) {
                 console.error('Error initializing player:', error);
                 this.showError(playerId, error.message);
@@ -241,6 +245,25 @@ function streamPlayer() {
 
             const contentType = video.dataset.contentType || '';
             const isLive = contentType === 'live';
+
+            // Safari with AirPlay: use native HLS so the AirPlay device can receive
+            // the manifest URL directly. HLS.js feeds data through MSE which prevents
+            // AirPlay from handing off the stream.
+            // On iOS all browsers use WebKit, so also check that the Google Cast SDK
+            // did NOT load — if it did, this is Chrome/Firefox on iOS and HLS.js
+            // should be used with Chromecast instead.
+            const hasWebKitAirPlay = 'webkitShowPlaybackTargetPicker' in HTMLVideoElement.prototype;
+            const castSdkLoaded = !!(window.cast && window.cast.framework);
+            const airplaySupported = hasWebKitAirPlay && !castSdkLoaded;
+
+            if (airplaySupported && video.canPlayType('application/vnd.apple.mpegurl')) {
+                console.log('Using Safari native HLS for AirPlay compatibility');
+                this.streamMetadata.format = 'HLS (Native)';
+                video.src = url;
+                this.setupNativeEvents(video, playerId);
+
+                return;
+            }
 
             if (typeof Hls !== 'undefined' && Hls.isSupported()) {
                 console.log('Creating HLS player with configuration...', { contentType, isLive });
@@ -875,6 +898,11 @@ function streamPlayer() {
             this.availableAudioTracks = [];
             this.selectedAudioTrack = null;
             this.baseUrl = null;
+
+            // Detach AirPlay listeners if attached
+            if (window.Alpine && Alpine.store('airplay')) {
+                Alpine.store('airplay').detachFromVideo();
+            }
 
             if (this.hls) {
                 console.log('Destroying HLS player');

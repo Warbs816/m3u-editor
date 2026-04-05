@@ -35,6 +35,18 @@
                     <span id="cast-button-label">Cast</span>
                 </button>
             </div>
+            <div id="airplay-button-container" style="display: none;">
+                <button
+                    id="airplay-button"
+                    class="flex items-center gap-2 rounded bg-white/10 hover:bg-white/20 px-3 py-1.5 text-xs font-medium text-white transition-colors"
+                    title="AirPlay"
+                >
+                    <svg class="h-4 w-4" viewBox="0 0 24 24" fill="currentColor" xmlns="http://www.w3.org/2000/svg">
+                        <path d="M6 22h12l-6-6zM21 3H3c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h4v-2H3V5h18v12h-4v2h4c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2z"/>
+                    </svg>
+                    <span id="airplay-button-label">AirPlay</span>
+                </button>
+            </div>
         </header>
 
         <section class="relative flex-1 overflow-hidden group">
@@ -502,6 +514,92 @@
             if (window.cast && window.cast.framework) {
                 initCast();
             }
+        })();
+
+        // AirPlay support for the popout player (Safari only, no Alpine dependency)
+        (function() {
+            if (!('webkitShowPlaybackTargetPicker' in HTMLVideoElement.prototype)) {
+                return;
+            }
+
+            const videoElement = document.getElementById('popout-player');
+            const container = document.getElementById('airplay-button-container');
+            const btn = document.getElementById('airplay-button');
+            const label = document.getElementById('airplay-button-label');
+            let isAirPlaying = false;
+
+            if (!videoElement || !container || !btn) {
+                return;
+            }
+
+            function toAbsoluteUrl(url) {
+                if (!url || url.startsWith('http://') || url.startsWith('https://')) {
+                    return url;
+                }
+                return window.location.origin + (url.startsWith('/') ? '' : '/') + url;
+            }
+
+            function updateButton() {
+                if (isAirPlaying) {
+                    btn.classList.remove('bg-white/10', 'hover:bg-white/20');
+                    btn.classList.add('bg-blue-600', 'hover:bg-blue-500');
+                    btn.title = 'Stop AirPlay';
+                    label.textContent = 'Stop AirPlay';
+                } else {
+                    btn.classList.remove('bg-blue-600', 'hover:bg-blue-500');
+                    btn.classList.add('bg-white/10', 'hover:bg-white/20');
+                    btn.title = 'AirPlay';
+                    label.textContent = 'AirPlay';
+                }
+            }
+
+            // Show the AirPlay button — check if cast URL is available
+            const castUnavailableReason = videoElement.dataset.castUnavailableReason || '';
+            const hasCastUrl = !!(videoElement.dataset.castUrl || @json($castUrl));
+
+            container.style.display = '';
+
+            if (!hasCastUrl && castUnavailableReason) {
+                btn.disabled = true;
+                btn.classList.add('opacity-40', 'cursor-not-allowed');
+                btn.classList.remove('hover:bg-white/20');
+                btn.title = castUnavailableReason;
+                label.textContent = castUnavailableReason;
+            }
+
+            // Listen for AirPlay device availability
+            videoElement.addEventListener('webkitplaybacktargetavailabilitychanged', (event) => {
+                console.log('[PopoutAirPlay] Target availability changed', {
+                    availability: event.availability,
+                });
+
+                if (event.availability !== 'available' && !hasCastUrl) {
+                    container.style.display = 'none';
+                }
+            });
+
+            // Listen for AirPlay state changes
+            videoElement.addEventListener('webkitcurrentplaybacktargetiswirelesschanged', () => {
+                const isWireless = videoElement.webkitCurrentPlaybackTargetIsWireless;
+                console.log('[PopoutAirPlay] Wireless playback changed', { isWireless });
+
+                isAirPlaying = isWireless;
+                updateButton();
+            });
+
+            btn.addEventListener('click', () => {
+                // Open the AirPlay picker immediately on the currently-playing video.
+                // Do NOT swap the source first — the picker requires a playable video
+                // and changing src puts it into HAVE_NOTHING.
+                try {
+                    videoElement.webkitShowPlaybackTargetPicker();
+                    console.log('[PopoutAirPlay] AirPlay picker opened');
+                } catch (e) {
+                    console.error('[PopoutAirPlay] Failed to open AirPlay picker:', e);
+                }
+            });
+
+            console.log('[PopoutAirPlay] AirPlay initialised for popout player');
         })();
     </script>
 </body>

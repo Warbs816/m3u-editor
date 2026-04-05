@@ -94,6 +94,64 @@
                         </svg>
                     </button>
 
+                    <!-- AirPlay hint (shown when opened from table action) -->
+                    <div
+                        x-show="$store.airplay && $store.airplay.showHint"
+                        x-cloak
+                        x-transition:enter="transition ease-out duration-300"
+                        x-transition:enter-start="opacity-0 -translate-x-1"
+                        x-transition:enter-end="opacity-100 translate-x-0"
+                        x-transition:leave="transition ease-in duration-500"
+                        x-transition:leave-start="opacity-100"
+                        x-transition:leave-end="opacity-0"
+                        class="flex items-center gap-1 text-[10px] font-medium text-white whitespace-nowrap pointer-events-none"
+                    >
+                        <span>Tap to AirPlay</span>
+                        <svg class="w-2.5 h-2.5" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M3 10a.75.75 0 01.75-.75h10.638L10.23 5.29a.75.75 0 111.04-1.08l5.5 5.25a.75.75 0 010 1.08l-5.5 5.25a.75.75 0 11-1.04-1.08l4.158-3.96H3.75A.75.75 0 013 10z" clip-rule="evenodd"/></svg>
+                    </div>
+
+                    <!-- AirPlay Button (Safari only, mutually exclusive with Chromecast) -->
+                    <button
+                        x-show="$store.airplay && $store.airplay.isSupported"
+                        x-cloak
+                        @click.stop="
+                            if ($store.airplay.showHint) $store.airplay.showHint = false;
+
+                            const castUrl = player.cast_url || '';
+                            const castFormat = player.cast_format || player.format;
+
+                            if (!castUrl) {
+                                console.warn('[AirPlayManager] No cast-safe URL available for player', {
+                                    title: player.display_title || player.title,
+                                    playerId: player.id,
+                                    streamId: player.stream_id,
+                                });
+                                return;
+                            }
+
+                            const videoEl = document.getElementById(player.id + '-video');
+                            if (!videoEl) return;
+
+                            if ($store.airplay.isCasting && $store.airplay.currentStreamUrl === castUrl) {
+                                $store.airplay.stopAirPlay();
+                            } else {
+                                $store.airplay.startAirPlay(videoEl, castUrl, null);
+                            }
+                        "
+                        :class="{
+                            'text-blue-500 dark:text-blue-400': player.cast_url && $store.airplay.isCasting && $store.airplay.currentStreamUrl === player.cast_url,
+                            'text-gray-400 hover:text-blue-600 dark:hover:text-blue-400': !(player.cast_url && $store.airplay.isCasting && $store.airplay.currentStreamUrl === player.cast_url),
+                            'opacity-40 cursor-not-allowed hover:text-gray-400 dark:hover:text-gray-400': !player.cast_url,
+                        }"
+                        :disabled="!player.cast_url"
+                        class="p-1 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded transition-colors focus:outline-none disabled:hover:bg-transparent"
+                        :title="!player.cast_url ? (player.cast_unavailable_reason || 'AirPlay unavailable for this stream') : ($store.airplay.isCasting && $store.airplay.currentStreamUrl === player.cast_url ? 'Stop AirPlay' : 'AirPlay')"
+                    >
+                        <svg class="w-3 h-3" viewBox="0 0 24 24" fill="currentColor" xmlns="http://www.w3.org/2000/svg">
+                            <path d="M6 22h12l-6-6zM21 3H3c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h4v-2H3V5h18v12h-4v2h4c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2z"/>
+                        </svg>
+                    </button>
+
                     <!-- Open in New Tab Button -->
                     <button
                         @click.stop="openInNewTab(player, '{{ route('player.popout') }}')"

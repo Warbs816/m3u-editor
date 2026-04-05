@@ -165,12 +165,7 @@ class EpisodesRelationManager extends RelationManager
                         if (! ($attrs['cast_url'] ?? null)) {
                             return;
                         }
-                        $livewire->dispatch('startDirectCast', [
-                            'cast_url' => $attrs['cast_url'],
-                            'cast_format' => $attrs['cast_format'],
-                            'title' => $attrs['display_title'] ?? $attrs['title'] ?? $record->title,
-                            'content_type' => $attrs['content_type'] ?? 'episode',
-                        ]);
+                        $livewire->dispatch('startDirectCast', $attrs);
                     })
                     ->icon('svg-chromecast')
                     ->button()
