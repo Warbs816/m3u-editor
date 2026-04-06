@@ -219,7 +219,7 @@ class EpgApiController extends Controller
                     });
                 })
                 ->when($group, function ($queryBuilder) use ($group) {
-                    return $queryBuilder->whereRaw('LOWER(COALESCE(channels.group, channels.group_internal)) = ?', [Str::lower($group)]);
+                    return $queryBuilder->whereRaw('LOWER(COALESCE(channels.`group`, channels.group_internal)) = ?', [Str::lower($group)]);
                 })
                 ->limit($perPage)
                 ->offset($skip)
@@ -383,7 +383,7 @@ class EpgApiController extends Controller
                         ->orWhereRaw('LOWER(channels.title_custom) LIKE ?', ['%'.$search.'%']);
                 });
             })->when($group, function ($queryBuilder) use ($group) {
-                return $queryBuilder->whereRaw('LOWER(COALESCE(channels.group, channels.group_internal)) = ?', [Str::lower($group)]);
+                return $queryBuilder->whereRaw('LOWER(COALESCE(channels.`group`, channels.group_internal)) = ?', [Str::lower($group)]);
             })->when(! $vod, function ($query) {
                 return $query->where('channels.is_vod', false);
             })->where('enabled', true)->count();
@@ -763,15 +763,15 @@ class EpgApiController extends Controller
         $vod = (bool) $request->get('vod', false);
 
         $groups = $playlist->channels()
-            ->selectRaw('COALESCE(channels.group, channels.group_internal) as effective_group')
+            ->selectRaw('COALESCE(channels.`group`, channels.group_internal) as effective_group')
             ->when(! $vod, function ($q) {
                 $q->where('channels.is_vod', false);
             })
             ->where('channels.enabled', true)
-            ->whereRaw('COALESCE(channels.group, channels.group_internal) IS NOT NULL')
-            ->whereRaw("COALESCE(channels.group, channels.group_internal) != ''")
-            ->groupByRaw('COALESCE(channels.group, channels.group_internal)')
-            ->orderByRaw('LOWER(COALESCE(channels.group, channels.group_internal))')
+            ->whereRaw('COALESCE(channels.`group`, channels.group_internal) IS NOT NULL')
+            ->whereRaw("COALESCE(channels.`group`, channels.group_internal) != ''")
+            ->groupByRaw('COALESCE(channels.`group`, channels.group_internal)')
+            ->orderByRaw('LOWER(COALESCE(channels.`group`, channels.group_internal))')
             ->pluck('effective_group')
             ->values()
             ->toArray();
