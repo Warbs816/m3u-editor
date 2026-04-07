@@ -1038,8 +1038,8 @@ class M3uProxyService
             $isFailover = ($actualChannel->id !== $originalChannelId);
 
             $metadata = [
-                'id' => $actualChannel->id,  // Actual channel being streamed
-                'channel_id' => (string) $actualChannel->id,  // Searchable by stopPlayerStream
+                'id' => $actualChannel->id,  // Used by proxy exclude_channel_id check
+                'channel_id' => (string) $actualChannel->id,  // Searched by stopPlayerStream
                 'type' => 'channel',
                 'playlist_uuid' => $playlist->uuid,  // Actual playlist being used
                 'profile_id' => $profile->id,
@@ -1102,8 +1102,8 @@ class M3uProxyService
             $isFailover = ($actualChannel->id !== $originalChannelId);
 
             $metadata = [
-                'id' => $actualChannel->id,  // Actual channel being streamed
-                'channel_id' => (string) $actualChannel->id,  // Searchable by stopPlayerStream
+                'id' => $actualChannel->id,  // Used by proxy exclude_channel_id check
+                'channel_id' => (string) $actualChannel->id,  // Searched by stopPlayerStream
                 'type' => 'channel',
                 'playlist_uuid' => $playlist->uuid,  // Actual playlist being used
                 'strict_live_ts' => $playlist->strict_live_ts ?? false,
