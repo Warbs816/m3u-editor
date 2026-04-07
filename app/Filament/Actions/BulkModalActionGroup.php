@@ -27,14 +27,14 @@ class BulkModalActionGroup extends BulkAction
         $static = parent::make($name);
 
         // Set defaults
-        $static->label('Bulk Actions');
-        $static->tooltip('Open bulk action menu');
+        $static->label(__('Bulk Actions'));
+        $static->tooltip(__('Open bulk action menu'));
         $static->icon('heroicon-s-wrench-screwdriver');
         $static->modalIcon('heroicon-o-wrench-screwdriver');
-        $static->modalHeading('Bulk Actions');
+        $static->modalHeading(__('Bulk Actions'));
         $static->modalWidth('2xl');
         $static->modalSubmitAction(false);
-        $static->modalCancelActionLabel('Cancel');
+        $static->modalCancelActionLabel(__('Cancel'));
         $static->color('gray');
         $static->slideOver(condition: true); // Default to slide-over for better UX with many actions
 
@@ -51,6 +51,15 @@ class BulkModalActionGroup extends BulkAction
 
     public function schema(array|Closure|null $schema): static
     {
+        // Ensure child actions close the parent modal when they complete
+        if (is_array($schema)) {
+            foreach ($schema as $component) {
+                if ($component instanceof BulkAction) {
+                    $component->cancelParentActions();
+                }
+            }
+        }
+
         // Wrap the schema in our grid layout
         $schema = [
             Grid::make(columns: $this->gridColumns)
@@ -62,6 +71,13 @@ class BulkModalActionGroup extends BulkAction
 
     public function actions(array $actions): static
     {
+        // Ensure child actions close the parent modal when they complete
+        foreach ($actions as $action) {
+            if ($action instanceof BulkAction) {
+                $action->cancelParentActions();
+            }
+        }
+
         $this->childActions = $actions;
 
         // Register these as modal footer actions with a closure

@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Controllers\Api\DispatcharrController;
 use App\Http\Controllers\AssetPreviewController;
 use App\Http\Controllers\Auth\OidcController;
 use App\Http\Controllers\CastStreamController;
@@ -18,6 +19,7 @@ use App\Http\Controllers\NetworkStreamController;
 use App\Http\Controllers\PlayerController;
 use App\Http\Controllers\PlaylistController;
 use App\Http\Controllers\PlaylistGenerateController;
+use App\Http\Controllers\PluginRunReportController;
 use App\Http\Controllers\ProxyController;
 use App\Http\Controllers\SchedulesDirectImageProxyController;
 use App\Http\Controllers\ShortURLController;
@@ -93,6 +95,10 @@ Route::get('/logo-proxy/{encodedUrl}/{filename?}', [LogoProxyController::class, 
 Route::get('/assets/{asset}/preview', AssetPreviewController::class)
     ->middleware(['auth'])
     ->name('assets.preview');
+
+Route::get('/extension-plugins/{plugin}/runs/{run}/report', PluginRunReportController::class)
+    ->middleware(['auth'])
+    ->name('extension-plugins.runs.report');
 
 Route::get('/logo-repository', [LogoRepositoryController::class, 'index'])
     ->name('logo.repository');
@@ -260,14 +266,14 @@ Route::group(['middleware' => ['auth:sanctum']], function () {
         ->name('api.proxy.streams');
 });
 
-// Playlist API routes (public with UUID auth)
-Route::group(['prefix' => 'playlist'], function () {
+// Playlist API routes (public with UUID auth - rate limited to prevent DoS/queue flooding)
+Route::middleware(['throttle:5,1'])->prefix('playlist')->group(function () {
     Route::get('{uuid}/sync', [PlaylistController::class, 'refreshPlaylist'])
         ->name('api.playlist.sync');
 });
 
-// EPG API routes
-Route::group(['prefix' => 'epg'], function () {
+// EPG API routes (rate limited to prevent DoS/queue flooding)
+Route::middleware(['throttle:5,1'])->prefix('epg')->group(function () {
     Route::get('{uuid}/sync', [EpgController::class, 'refreshEpg'])
         ->name('api.epg.sync');
 });
@@ -291,7 +297,7 @@ Route::get('/cast/series/{username}/{password}/{streamId}.{format?}', [CastStrea
 Route::get('/cast/segment', [CastStreamController::class, 'segment'])
     ->name('cast.stream.segment');
 
-// Stream endpoints
+// Xtream API stream endpoints
 Route::get('/live/{username}/{password}/{streamId}.{format?}', [XtreamStreamController::class, 'handleLive'])
     ->name('xtream.stream.live.root');
 Route::get('/movie/{username}/{password}/{streamId}.{format?}', [XtreamStreamController::class, 'handleVod'])
@@ -302,6 +308,11 @@ Route::get('/series/{username}/{password}/{streamId}.{format?}', [XtreamStreamCo
 // Timeshift endpoints
 Route::get('/timeshift/{username}/{password}/{duration}/{date}/{streamId}.{format?}', [XtreamStreamController::class, 'handleTimeshift'])
     ->name('xtream.stream.timeshift.root');
+
+// Dispatcharr-compatible proxy stream endpoint (used by emby-xtream plugin)
+Route::get('/proxy/ts/stream/{uuid}', [DispatcharrController::class, 'proxyStream'])
+    ->name('dispatcharr.proxy.stream')
+    ->where('uuid', '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}');
 
 // (Fallback) direct stream access (without /live/ or /movie/ prefix)
 Route::get('/{username}/{password}/{streamId}.{format?}', [XtreamStreamController::class, 'handleDirect'])

@@ -166,7 +166,7 @@ return [
     |
     */
 
-    'memory_limit' => 64,
+    'memory_limit' => 128,
 
     /*
     |--------------------------------------------------------------------------
@@ -191,7 +191,7 @@ return [
             'maxJobs' => 0,
             'memory' => 512, // MB
             'tries' => 3, // Number of times to attempt a job before marking it as failed
-            'timeout' => 60 * 30, // 30 minutes
+            'timeout' => 60 * 125, // Should be longer than the retry_after value set in queue.php
             'nice' => 0,
         ],
     ],

@@ -4,19 +4,24 @@ namespace App\Providers\Filament;
 
 use App\Filament\Auth\EditProfile;
 use App\Filament\Auth\Login;
+use App\Filament\CopilotTools\EpgMappingStateTool;
 use App\Filament\Pages\Backups;
 use App\Filament\Pages\CustomDashboard;
 use App\Filament\Widgets\DiscordWidget;
 use App\Filament\Widgets\DocumentsWidget;
 use App\Filament\Widgets\DonateCrypto;
 use App\Filament\Widgets\KoFiWidget;
+use App\Filament\Widgets\PluginsOverviewWidget;
 use App\Filament\Widgets\SharedStreamStatsWidget;
 use App\Filament\Widgets\StatsOverview;
 use App\Filament\Widgets\SystemHealthWidget;
 use App\Filament\Widgets\UpdateNoticeWidget;
 use App\Http\Middleware\DashboardMiddleware;
 // use App\Filament\Widgets\PayPalDonateWidget;
+use App\Http\Middleware\SeedLocaleFromUser;
 use App\Settings\GeneralSettings;
+use CraftForge\FilamentLanguageSwitcher\FilamentLanguageSwitcherPlugin;
+use EslamRedaDiv\FilamentCopilot\FilamentCopilotPlugin;
 use Exception;
 use Filament\Auth\MultiFactor\App\AppAuthentication;
 use Filament\Http\Middleware\Authenticate;
@@ -51,6 +56,15 @@ class AdminPanelProvider extends PanelProvider
             'show_breadcrumbs' => true,
             'content_width' => Width::ScreenLarge,
             'output_wan_address' => false,
+            'copilot_enabled' => false,
+            'copilot_mgmt_enabled' => false,
+            'copilot_api_key' => null,
+            'copilot_provider' => null,
+            'copilot_model' => null,
+            'copilot_system_prompt' => '',
+            'copilot_global_tools' => [],
+            'copilot_quick_actions' => [],
+            'copilot_url' => null,
         ];
         try {
             $envShowWan = config('dev.show_wan_details', false);
@@ -61,6 +75,15 @@ class AdminPanelProvider extends PanelProvider
                 'output_wan_address' => $envShowWan !== null
                     ? (bool) $envShowWan
                     : (bool) ($userPreferences->output_wan_address ?? $settings['output_wan_address']),
+                'copilot_enabled' => $userPreferences->copilot_enabled ?? $settings['copilot_enabled'],
+                'copilot_mgmt_enabled' => $userPreferences->copilot_mgmt_enabled ?? $settings['copilot_mgmt_enabled'],
+                'copilot_api_key' => $userPreferences->copilot_api_key ?? $settings['copilot_api_key'],
+                'copilot_provider' => $userPreferences->copilot_provider ?? $settings['copilot_provider'],
+                'copilot_model' => $userPreferences->copilot_model ?? $settings['copilot_model'],
+                'copilot_system_prompt' => $userPreferences->copilot_system_prompt ?? $settings['copilot_system_prompt'],
+                'copilot_global_tools' => $userPreferences->copilot_global_tools ?? $settings['copilot_global_tools'],
+                'copilot_quick_actions' => $userPreferences->copilot_quick_actions ?? $settings['copilot_quick_actions'],
+                'copilot_url' => $userPreferences->copilot_url ?? $settings['copilot_url'],
             ];
         } catch (Exception $e) {
             // Ignore
@@ -93,36 +116,38 @@ class AdminPanelProvider extends PanelProvider
                 CustomDashboard::class,
             ])
             ->navigationGroups([
-                NavigationGroup::make('Playlist')
+                NavigationGroup::make(fn () => __('Playlist'))
                     ->icon('heroicon-m-play-pause'),
-                NavigationGroup::make('Integrations')
+                NavigationGroup::make(fn () => __('Integrations'))
                     ->icon('heroicon-m-server-stack'),
-                NavigationGroup::make('Live Channels')
+                NavigationGroup::make(fn () => __('Live Channels'))
                     ->icon('heroicon-m-tv'),
-                NavigationGroup::make('VOD Channels')
+                NavigationGroup::make(fn () => __('VOD Channels'))
                     ->icon('heroicon-m-film'),
-                NavigationGroup::make('Series')
+                NavigationGroup::make(fn () => __('Series'))
                     ->icon('heroicon-m-play'),
-                NavigationGroup::make('EPG')
+                NavigationGroup::make(fn () => __('EPG'))
                     ->icon('heroicon-m-calendar-days'),
-                NavigationGroup::make('Proxy')
+                NavigationGroup::make(fn () => __('Proxy'))
                     ->icon('heroicon-m-arrows-right-left'),
-                NavigationGroup::make('Tools')
+                NavigationGroup::make(fn () => __('Plugins'))
+                    ->icon('heroicon-m-puzzle-piece'),
+                NavigationGroup::make(fn () => __('Tools'))
                     ->collapsed()
                     ->icon('heroicon-m-wrench-screwdriver'),
             ])
             ->navigationItems([
                 NavigationItem::make('API Docs')
-                    ->label('API Docs ↗')
+                    ->label(fn () => __('API Docs').' ↗')
                     ->url('/docs/api', shouldOpenInNewTab: true)
-                    ->group('Tools')
+                    ->group(fn () => __('Tools'))
                     ->sort(sort: 9)
                     ->icon(null)
                     ->visible(fn (): bool => auth()->user()->isAdmin()),
                 NavigationItem::make('Queue Manager')
-                    ->label('Queue Manager ↗')
+                    ->label(fn () => __('Queue Manager').' ↗')
                     ->url('/horizon', shouldOpenInNewTab: true)
-                    ->group('Tools')
+                    ->group(fn () => __('Tools'))
                     ->sort(10)
                     ->icon(null)
                     ->visible(fn (): bool => auth()->user()->isAdmin()),
@@ -135,16 +160,38 @@ class AdminPanelProvider extends PanelProvider
                 DiscordWidget::class,
                 // PayPalDonateWidget::class,
                 KoFiWidget::class,
+                PluginsOverviewWidget::class,
                 // DonateCrypto::class,
                 StatsOverview::class,
                 // SharedStreamStatsWidget::class,
                 // SystemHealthWidget::class,
             ])
-            ->plugins([
+            ->plugins(array_filter([
                 FilamentSpatieLaravelBackupPlugin::make()
                     ->authorize(fn (): bool => auth()->user()->isAdmin())
                     ->usingPage(Backups::class),
-            ])
+                FilamentLanguageSwitcherPlugin::make()
+                    ->locales([
+                        ['code' => 'en', 'name' => 'English', 'flag' => 'us'],
+                        ['code' => 'fr', 'name' => 'Français', 'flag' => 'fr'],
+                        ['code' => 'de', 'name' => 'Deutsch', 'flag' => 'de'],
+                        ['code' => 'es', 'name' => 'Español', 'flag' => 'es'],
+                    ])
+                    ->showFlags(false)
+                    ->rememberLocale()
+                    ->showOnAuthPages(false),
+                $this->buildCopilotPlugin([
+                    'copilot_enabled' => $settings['copilot_enabled'],
+                    'copilot_mgmt_enabled' => $settings['copilot_mgmt_enabled'],
+                    'copilot_api_key' => $settings['copilot_api_key'],
+                    'copilot_provider' => $settings['copilot_provider'],
+                    'copilot_model' => $settings['copilot_model'],
+                    'copilot_system_prompt' => $settings['copilot_system_prompt'],
+                    'copilot_global_tools' => $settings['copilot_global_tools'],
+                    'copilot_quick_actions' => $settings['copilot_quick_actions'],
+                    'copilot_url' => $settings['copilot_url'],
+                ]),
+            ]))
             ->maxContentWidth($settings['content_width'])
             ->middleware([
                 EncryptCookies::class,
@@ -157,6 +204,7 @@ class AdminPanelProvider extends PanelProvider
                 SubstituteBindings::class,
                 DisableBladeIconComponents::class,
                 DispatchServingFilamentEvent::class,
+                SeedLocaleFromUser::class, // Seeds session from DB locale (runs before plugin's SetLocale)
             ])
             ->authMiddleware([
                 Authenticate::class,
@@ -215,5 +263,88 @@ class AdminPanelProvider extends PanelProvider
 
         // Return the configured panel
         return $adminPanel;
+    }
+
+    /**
+     * Build the Copilot plugin from database settings.
+     * Returns null when the plugin is disabled or not fully configured.
+     */
+    /** Default models used when the model field is left blank. */
+    private const COPILOT_DEFAULT_MODELS = [
+        'openai' => 'gpt-4o',
+        'anthropic' => 'claude-sonnet-4',
+        'gemini' => 'gemini-2.0-flash',
+        'mistral' => 'mistral-large-latest',
+        'ollama' => 'llama3',
+        'groq' => 'llama-3.3-70b-versatile',
+        'deepseek' => 'deepseek-chat',
+        'xai' => 'grok-3',
+        'openrouter' => 'openai/gpt-4o',
+    ];
+
+    /**
+     * Build the Copilot plugin from database settings.
+     * Returns null when the plugin is disabled or not fully configured.
+     */
+    private function buildCopilotPlugin(array $s): ?FilamentCopilotPlugin
+    {
+        // Skip during tests — the settings table is not yet created when panel() runs
+        // (RefreshDatabase migrations happen after service provider registration).
+        if (app()->environment('testing')) {
+            return null;
+        }
+
+        try {
+            $isConfigured = $s['copilot_enabled']
+                && ! empty($s['copilot_provider'])
+                && (! empty($s['copilot_api_key']) || $s['copilot_provider'] === 'ollama');
+
+            if (! $isConfigured) {
+                return null;
+            }
+
+            $model = $s['copilot_model']
+                ?: (self::COPILOT_DEFAULT_MODELS[$s['copilot_provider']] ?? 'gpt-4o');
+
+            if (! empty($s['copilot_url']) && in_array($s['copilot_provider'], ['openai', 'ollama'], true)) {
+                config(["ai.providers.{$s['copilot_provider']}.url" => $s['copilot_url']]);
+            }
+
+            return FilamentCopilotPlugin::make()
+                ->provider($s['copilot_provider'])
+                ->model($model)
+                ->systemPrompt($s['copilot_system_prompt'] ?: 'You are a helpful AI assistant integrated into m3u editor. You help users manage playlists, EPG data, streams, channels, and other media features. Be concise and accurate.')
+                ->globalTools($s['copilot_global_tools'] ?? [])
+                ->quickActions($this->buildQuickActions($s))
+                ->managementEnabled($s['copilot_mgmt_enabled'] ?? false)
+                ->managementGuard('admin')
+                ->respectAuthorization()
+                ->authorizeUsing(fn ($user) => $user->isAdmin());
+        } catch (Throwable) {
+
+            return null;
+        }
+    }
+
+    /**
+     * Build the quick actions list, automatically prepending the EPG mapper
+     * quick action when that tool is enabled — without exposing it in the
+     * user-editable Preferences UI.
+     *
+     * @param  array<string, mixed>  $s
+     * @return list<array{label: string, prompt: string}>
+     */
+    private function buildQuickActions(array $s): array
+    {
+        $quickActions = array_values($s['copilot_quick_actions'] ?? []);
+
+        if (in_array(EpgMappingStateTool::class, $s['copilot_global_tools'] ?? [], true)) {
+            array_unshift($quickActions, [
+                'label' => 'Map EPG Channels',
+                'prompt' => 'I want to map EPG guide data to my playlist channels. Call the EPG mapping state tool now without a playlist_id to list all available playlists and their mapped/unmapped counts.',
+            ]);
+        }
+
+        return $quickActions;
     }
 }

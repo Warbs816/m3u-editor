@@ -288,10 +288,10 @@ class ChannelController extends Controller
             ], 403);
         }
 
-        // Get stream stats
+        // Perform live stream probe
         $streamStats = [];
         try {
-            $streamStats = $channel->stream_stats;
+            $streamStats = $channel->probeStreamStats();
         } catch (\Exception $e) {
             $streamStats = [
                 'error' => 'Unable to retrieve stream statistics',
@@ -386,11 +386,11 @@ class ChannelController extends Controller
             })
             ->get();
 
-        // Get stream stats for each channel
+        // Perform live stream probe for each channel
         $results = $channels->map(function ($channel) {
             $stats = [];
             try {
-                $stats = $channel->stream_stats;
+                $stats = $channel->probeStreamStats();
             } catch (\Exception $e) {
                 $stats = [
                     'error' => 'Unable to retrieve stream statistics',
@@ -752,14 +752,13 @@ class ChannelController extends Controller
 
         $validated = $request->validate([
             'ids' => 'required|array|min:1',
-            'ids.*' => 'integer|exists:channels,id',
+            'ids.*' => ['integer', Rule::exists('channels', 'id')->where('user_id', $user->id)],
             'enabled' => 'required|boolean',
         ]);
 
         $ids = $validated['ids'];
         $enabled = $validated['enabled'];
 
-        // Update only channels that belong to the user
         $updatedCount = Channel::where('user_id', $user->id)
             ->whereIn('id', $ids)
             ->update(['enabled' => $enabled]);
@@ -814,7 +813,7 @@ class ChannelController extends Controller
 
         $validated = $request->validate([
             'ids' => 'sometimes|array|min:1',
-            'ids.*' => 'integer|exists:channels,id',
+            'ids.*' => ['integer', Rule::exists('channels', 'id')->where('user_id', $user->id)],
             'filter' => 'sometimes|array',
             'filter.playlist_uuid' => 'sometimes|string',
             'filter.group_id' => 'sometimes|integer',
@@ -1053,7 +1052,7 @@ class ChannelController extends Controller
 
         $validated = $request->validate([
             'channel_ids' => 'required|array|min:1|max:50',
-            'channel_ids.*' => 'integer|exists:channels,id',
+            'channel_ids.*' => ['integer', Rule::exists('channels', 'id')->where('user_id', $user->id)],
         ]);
 
         $channelIds = $validated['channel_ids'];

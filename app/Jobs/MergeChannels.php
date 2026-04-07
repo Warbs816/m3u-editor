@@ -444,7 +444,7 @@ class MergeChannels implements ShouldQueue
      */
     protected function getCodec($channel): ?string
     {
-        $streamStats = $channel->stream_stats ?? [];
+        $streamStats = $channel->ensureStreamStats();
         foreach ($streamStats as $stream) {
             if (isset($stream['stream']['codec_type']) && $stream['stream']['codec_type'] === 'video') {
                 return $stream['stream']['codec_name'] ?? null;
@@ -536,7 +536,7 @@ class MergeChannels implements ShouldQueue
      */
     protected function getResolution($channel): int
     {
-        $streamStats = $channel->stream_stats ?? [];
+        $streamStats = $channel->ensureStreamStats();
         foreach ($streamStats as $stream) {
             if (isset($stream['stream']['codec_type']) && $stream['stream']['codec_type'] === 'video') {
                 return ($stream['stream']['width'] ?? 0) * ($stream['stream']['height'] ?? 0);

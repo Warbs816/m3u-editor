@@ -2,9 +2,11 @@
 
 namespace App\Filament\Resources\Playlists\Resources\PlaylistSyncStatuses;
 
+use App\Filament\Concerns\HasCopilotSupport;
 use App\Filament\Resources\Playlists\PlaylistResource;
 use App\Models\PlaylistSyncStatus;
 use App\Services\DateFormatService;
+use EslamRedaDiv\FilamentCopilot\Contracts\CopilotResource;
 use Filament\Actions;
 use Filament\Infolists;
 use Filament\Resources\ParentResourceRegistration;
@@ -15,8 +17,10 @@ use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Enums\RecordActionsPosition;
 use Filament\Tables\Table;
 
-class PlaylistSyncStatusResource extends Resource
+class PlaylistSyncStatusResource extends Resource implements CopilotResource
 {
+    use HasCopilotSupport;
+
     protected static ?string $model = PlaylistSyncStatus::class;
 
     protected static ?string $parentResource = PlaylistResource::class;
@@ -46,20 +50,20 @@ class PlaylistSyncStatusResource extends Resource
     {
         return $schema
             ->components([
-                Section::make('Sync Information')
+                Section::make(__('Sync Information'))
                     ->columnSpanFull()
                     ->columns(3)
                     ->schema([
                         Infolists\Components\TextEntry::make('name')
-                            ->label('Playlist name'),
+                            ->label(__('Playlist name')),
                         Infolists\Components\TextEntry::make('sync_stats.time_rounded')
-                            ->label('Sync time')
-                            ->helperText('Total time to sync playlist (in seconds)'),
+                            ->label(__('Sync time'))
+                            ->helperText(__('Total time to sync playlist (in seconds)')),
                         Infolists\Components\TextEntry::make('created_at')
-                            ->label('Synced at')
+                            ->label(__('Synced at'))
                             ->formatStateUsing(fn ($state) => app(DateFormatService::class)->format($state)),
                         Infolists\Components\TextEntry::make('sync_stats.status')
-                            ->label('Status')
+                            ->label(__('Status'))
                             ->default('success')
                             ->badge()
                             ->color(function ($state) {
@@ -70,7 +74,7 @@ class PlaylistSyncStatusResource extends Resource
                                 };
                             }),
                         Infolists\Components\TextEntry::make('sync_stats.message')
-                            ->label('Message')
+                            ->label(__('Message'))
                             ->columnSpan(2)
                             ->default('N/A'),
                     ]),
@@ -84,17 +88,17 @@ class PlaylistSyncStatusResource extends Resource
             ->defaultSort('created_at', 'desc')
             ->columns([
                 TextColumn::make('created_at')
-                    ->label('Synced')
+                    ->label(__('Synced'))
                     ->formatStateUsing(fn ($state) => app(DateFormatService::class)->format($state))
                     ->sortable()
                     ->toggleable(),
                 TextColumn::make('name')
-                    ->label('Playlist Name')
+                    ->label(__('Playlist Name'))
                     ->searchable()
                     ->sortable()
                     ->toggleable(),
                 TextColumn::make('sync_stats.status')
-                    ->label('Status')
+                    ->label(__('Status'))
                     ->searchable()
                     ->badge()
                     ->color(function ($state) {
@@ -108,22 +112,22 @@ class PlaylistSyncStatusResource extends Resource
                     ->sortable()
                     ->toggleable(),
                 TextColumn::make('added_channels_count')
-                    ->label('Added Channels')
+                    ->label(__('Added Channels'))
                     ->counts('addedChannels')
                     ->toggleable()
                     ->sortable(),
                 TextColumn::make('removed_channels_count')
-                    ->label('Removed Channels')
+                    ->label(__('Removed Channels'))
                     ->counts('removedChannels')
                     ->toggleable()
                     ->sortable(),
                 TextColumn::make('added_groups_count')
-                    ->label('Added Groups')
+                    ->label(__('Added Groups'))
                     ->counts('addedGroups')
                     ->toggleable()
                     ->sortable(),
                 TextColumn::make('removed_groups_count')
-                    ->label('Removed Groups')
+                    ->label(__('Removed Groups'))
                     ->counts('removedGroups')
                     ->toggleable()
                     ->sortable(),
@@ -133,8 +137,8 @@ class PlaylistSyncStatusResource extends Resource
             ])
             ->recordActions([
                 Actions\DeleteAction::make()
-                    ->modalDescription('Delete this sync log?')
-                    ->modalSubmitActionLabel('Delete now')
+                    ->modalDescription(__('Delete this sync log?'))
+                    ->modalSubmitActionLabel(__('Delete now'))
                     ->button()->hiddenLabel()->size('sm'),
                 Actions\ViewAction::make()
                     ->button()->hiddenLabel()->size('sm'),

@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Controllers\Api\DispatcharrController;
 use App\Http\Controllers\Api\EpgApiController;
 use App\Http\Controllers\Api\M3uProxyApiController;
 use Illuminate\Support\Facades\Route;
@@ -8,33 +9,63 @@ use Illuminate\Support\Facades\Route;
  * EPG API routes
  */
 
-Route::group(['prefix' => 'epg'], function () {
+/*
+ * EPG API routes (authenticated - used by the in-app EPG viewer)
+ */
+
+Route::middleware(['throttle:60,1'])->prefix('epg')->group(function () {
     Route::get('{uuid}/data', [EpgApiController::class, 'getData'])
         ->name('api.epg.data');
     Route::get('playlist/{uuid}/data', [EpgApiController::class, 'getDataForPlaylist'])
         ->name('api.epg.playlist.data');
+    Route::get('playlist/{uuid}/groups', [EpgApiController::class, 'getGroupsForPlaylist'])
+        ->name('api.epg.playlist.groups');
 });
 
 /*
  * m3u-proxy API routes
  */
-Route::middleware(['proxy.throttle'])->prefix('m3u-proxy')->group(function () {
+Route::prefix('m3u-proxy')->group(function () {
     // Failover resolver - called by m3u-proxy to validate failover URLs
     Route::post('failover-resolver', [M3uProxyApiController::class, 'resolveFailoverUrl'])
-        ->name('m3u-proxy.failover-resolver')
-        ->withoutMiddleware('proxy.throttle');
+        ->name('m3u-proxy.failover-resolver');
 
     // Player stream stop - called via sendBeacon when in-app player is closed
     Route::post('player-stream/stop', [M3uProxyApiController::class, 'stopPlayerStream'])
-        ->name('m3u-proxy.player-stream.stop')
-        ->withoutMiddleware('proxy.throttle');
+        ->name('m3u-proxy.player-stream.stop');
 
-    // Main proxy routes
+    // Proxy webhook endpoint - called by m3u-proxy to notify of events
+    // Relies on `m3u-proxy:register-webhook` to register this endpoint with the proxy
     Route::post('webhooks', [M3uProxyApiController::class, 'handleWebhook'])
         ->name('m3u-proxy.webhook');
 
     // Network broadcast callback - called by proxy when broadcast FFmpeg process exits
     Route::post('broadcast/callback', [M3uProxyApiController::class, 'handleBroadcastCallback'])
-        ->name('m3u-proxy.broadcast.callback')
-        ->withoutMiddleware('proxy.throttle');
+        ->name('m3u-proxy.broadcast.callback');
+});
+
+/*
+ * Dispatcharr-compatible API routes (used by emby-xtream plugin)
+ */
+Route::prefix('accounts')->group(function () {
+    Route::post('token', [DispatcharrController::class, 'login'])
+        ->name('dispatcharr.token');
+    Route::post('token/refresh', [DispatcharrController::class, 'refresh'])
+        ->name('dispatcharr.token.refresh');
+});
+
+Route::prefix('channels')->middleware('dispatcharr.auth')->group(function () {
+    Route::get('profiles', [DispatcharrController::class, 'profiles'])
+        ->name('dispatcharr.profiles');
+    Route::get('channels', [DispatcharrController::class, 'channels'])
+        ->name('dispatcharr.channels');
+});
+
+Route::prefix('vod')->middleware('dispatcharr.auth')->group(function () {
+    Route::get('movies/{streamId}', [DispatcharrController::class, 'vodMovieDetail'])
+        ->name('dispatcharr.vod.movie.detail')
+        ->whereNumber('streamId');
+    Route::get('movies/{streamId}/providers', [DispatcharrController::class, 'vodMovieProviders'])
+        ->name('dispatcharr.vod.movie.providers')
+        ->whereNumber('streamId');
 });

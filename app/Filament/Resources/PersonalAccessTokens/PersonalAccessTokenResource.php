@@ -2,8 +2,10 @@
 
 namespace App\Filament\Resources\PersonalAccessTokens;
 
+use App\Filament\Concerns\HasCopilotSupport;
 use App\Models\PersonalAccessToken;
 use App\Services\DateFormatService;
+use EslamRedaDiv\FilamentCopilot\Contracts\CopilotResource;
 use Filament\Actions;
 use Filament\Forms;
 use Filament\Resources\Resource;
@@ -13,13 +15,31 @@ use Filament\Tables\Enums\RecordActionsPosition;
 use Filament\Tables\Table;
 use Illuminate\Database\Eloquent\Builder;
 
-class PersonalAccessTokenResource extends Resource
+class PersonalAccessTokenResource extends Resource implements CopilotResource
 {
+    use HasCopilotSupport;
+
     protected static ?string $model = PersonalAccessToken::class;
 
-    protected static string|\UnitEnum|null $navigationGroup = 'Tools';
+    public static function getNavigationGroup(): ?string
+    {
+        return __('Tools');
+    }
 
-    protected static ?string $navigationLabel = 'API Tokens';
+    public static function getModelLabel(): string
+    {
+        return __('Personal Access Token');
+    }
+
+    public static function getPluralModelLabel(): string
+    {
+        return __('Personal Access Tokens');
+    }
+
+    public static function getNavigationLabel(): string
+    {
+        return __('API Tokens');
+    }
 
     protected static ?string $breadcrumb = 'API Tokens';
 
@@ -57,13 +77,13 @@ class PersonalAccessTokenResource extends Resource
     {
         return [
             Forms\Components\TextInput::make('name')
-                ->label('Token Name')
+                ->label(__('Token Name'))
                 ->required()
                 ->maxLength(255)
                 ->columnSpanFull()
-                ->placeholder('Enter Token Name'),
+                ->placeholder(__('Enter Token Name')),
             Forms\Components\Select::make('abilities')
-                ->label('Permissions')
+                ->label(__('Permissions'))
                 ->multiple()
                 ->required()
                 ->options([
@@ -73,8 +93,8 @@ class PersonalAccessTokenResource extends Resource
                     'delete' => 'Delete',
                 ])->default(['create', 'view', 'update']),
             Forms\Components\DatePicker::make('expires_at')
-                ->label('Expiration Date')
-                ->helperText('Select Expiration Date, or leave empty for no expiration')
+                ->label(__('Expiration Date'))
+                ->helperText(__('Select Expiration Date, or leave empty for no expiration'))
                 ->minDate(now()->addDays(1))
                 ->maxDate(now()->addYears(10)),
         ];
@@ -86,7 +106,7 @@ class PersonalAccessTokenResource extends Resource
             ->recordTitleAttribute('name')
             ->columns([
                 Tables\Columns\TextColumn::make('name')
-                    ->label('Token Name')
+                    ->label(__('Token Name'))
                     ->searchable(),
                 Tables\Columns\TextColumn::make('abilities')
                     ->badge()
@@ -111,7 +131,7 @@ class PersonalAccessTokenResource extends Resource
             ])
             ->recordActions([
                 Actions\DeleteAction::make()
-                    ->modalDescription('Are you sure you want to delete this token? This action cannot be undone.')
+                    ->modalDescription(__('Are you sure you want to delete this token? This action cannot be undone.'))
                     ->button()->hiddenLabel()->size('sm'),
                 Actions\EditAction::make()
                     ->button()->hiddenLabel()->size('sm'),

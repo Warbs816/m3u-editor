@@ -2,11 +2,13 @@
 
 namespace App\Filament\Resources\ChannelScrubbers\Resources\ChannelScrubberLogs;
 
+use App\Filament\Concerns\HasCopilotSupport;
 use App\Filament\Resources\ChannelScrubbers\ChannelScrubberResource;
 use App\Filament\Resources\ChannelScrubbers\Resources\ChannelScrubberLogs\Pages\ViewChannelScrubberLog;
 use App\Filament\Resources\ChannelScrubbers\Resources\ChannelScrubberLogs\RelationManagers\DeadChannelsRelationManager;
 use App\Models\ChannelScrubberLog;
 use App\Services\DateFormatService;
+use EslamRedaDiv\FilamentCopilot\Contracts\CopilotResource;
 use Filament\Actions\DeleteAction;
 use Filament\Actions\DeleteBulkAction;
 use Filament\Actions\ViewAction;
@@ -19,8 +21,10 @@ use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Enums\RecordActionsPosition;
 use Filament\Tables\Table;
 
-class ChannelScrubberLogResource extends Resource
+class ChannelScrubberLogResource extends Resource implements CopilotResource
 {
+    use HasCopilotSupport;
+
     protected static ?string $model = ChannelScrubberLog::class;
 
     protected static ?string $parentResource = ChannelScrubberResource::class;
@@ -46,13 +50,13 @@ class ChannelScrubberLogResource extends Resource
     {
         return $schema
             ->components([
-                Section::make('Run Summary')
+                Section::make(__('Run Summary'))
                     ->columnSpanFull()
                     ->compact()
                     ->columns(3)
                     ->schema([
                         Infolists\Components\TextEntry::make('created_at')
-                            ->label('Ran At')
+                            ->label(__('Ran At'))
                             ->formatStateUsing(fn ($state) => app(DateFormatService::class)->format($state)),
                         Infolists\Components\TextEntry::make('status')
                             ->badge()
@@ -63,16 +67,16 @@ class ChannelScrubberLogResource extends Resource
                                 default => 'danger',
                             }),
                         Infolists\Components\TextEntry::make('runtime')
-                            ->label('Runtime')
+                            ->label(__('Runtime'))
                             ->formatStateUsing(fn ($state): string => $state ? gmdate('H:i:s', (int) $state) : '-'),
                         Infolists\Components\TextEntry::make('channel_count')
-                            ->label('Channels Checked'),
+                            ->label(__('Channels Checked')),
                         Infolists\Components\TextEntry::make('dead_count')
-                            ->label('Dead Links Found')
+                            ->label(__('Dead Links Found'))
                             ->badge()
                             ->color(fn ($state) => $state > 0 ? 'danger' : 'success'),
                         Infolists\Components\TextEntry::make('disabled_count')
-                            ->label('Channels Disabled')
+                            ->label(__('Channels Disabled'))
                             ->badge()
                             ->color(fn ($state) => $state > 0 ? 'warning' : 'success'),
                     ]),
@@ -86,7 +90,7 @@ class ChannelScrubberLogResource extends Resource
             ->defaultSort('created_at', 'desc')
             ->columns([
                 TextColumn::make('created_at')
-                    ->label('Ran At')
+                    ->label(__('Ran At'))
                     ->formatStateUsing(fn ($state) => app(DateFormatService::class)->format($state))
                     ->sortable()
                     ->toggleable(),
@@ -101,23 +105,23 @@ class ChannelScrubberLogResource extends Resource
                     ->sortable()
                     ->toggleable(),
                 TextColumn::make('channel_count')
-                    ->label('Channels Checked')
+                    ->label(__('Channels Checked'))
                     ->sortable()
                     ->toggleable(),
                 TextColumn::make('dead_count')
-                    ->label('Dead Links')
+                    ->label(__('Dead Links'))
                     ->badge()
                     ->color(fn ($state) => $state > 0 ? 'danger' : 'success')
                     ->sortable()
                     ->toggleable(),
                 TextColumn::make('disabled_count')
-                    ->label('Channels Disabled')
+                    ->label(__('Channels Disabled'))
                     ->badge()
                     ->color(fn ($state) => $state > 0 ? 'warning' : 'success')
                     ->sortable()
                     ->toggleable(),
                 TextColumn::make('runtime')
-                    ->label('Runtime')
+                    ->label(__('Runtime'))
                     ->formatStateUsing(fn ($state): string => $state ? gmdate('H:i:s', (int) $state) : '-')
                     ->sortable()
                     ->toggleable(),
