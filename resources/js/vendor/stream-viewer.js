@@ -17,6 +17,7 @@ function streamPlayer() {
         },
         availableAudioTracks: [],
         selectedAudioTrack: null,
+        fragmentErrorCount: 0,
 
         // ── Watch Progress ────────────────────────────────────────────────
         progressConfig: null,   // { contentType, streamId, playlistId, seriesId, seasonNumber }
@@ -331,7 +332,6 @@ function streamPlayer() {
                         // For segment loading errors, let's show the specific error
                         if (data.details && data.details.includes('FRAG_LOAD_ERROR')) {
                             // If we've had multiple fragment errors, fall back
-                            if (!this.fragmentErrorCount) this.fragmentErrorCount = 0;
                             this.fragmentErrorCount++;
 
                             if (this.fragmentErrorCount >= 3) {
@@ -525,15 +525,12 @@ function streamPlayer() {
             });
 
             video.addEventListener('error', (e) => {
-                if (video.error.code === video.error.MEDIA_ELEMENT_ERROR) {
-                    return; // Ignore MEDIA_ELEMENT_ERROR which can happen on cleanup
+                if (!video.error || video.error.code === video.error.MEDIA_ERR_ABORTED) {
+                    return; // Ignore abort errors which can happen during cleanup
                 }
                 let errorMessage = 'Playback failed';
                 if (video.error) {
                     switch (video.error.code) {
-                        case video.error.MEDIA_ERR_ABORTED:
-                            errorMessage = 'Playback aborted';
-                            break;
                         case video.error.MEDIA_ERR_NETWORK:
                             errorMessage = 'Network error';
                             break;
