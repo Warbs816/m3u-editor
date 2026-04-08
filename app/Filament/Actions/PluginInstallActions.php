@@ -5,6 +5,7 @@ namespace App\Filament\Actions;
 use App\Filament\Resources\PluginInstallReviews\PluginInstallReviewResource;
 use App\Models\PluginInstallReview;
 use App\Plugins\PluginManager;
+use App\Plugins\PluginUpdateChecker;
 use Filament\Actions\Action;
 use Filament\Actions\ActionGroup;
 use Filament\Forms\Components\FileUpload;
@@ -168,6 +169,38 @@ class PluginInstallActions
                     }),
             ])->label(__('Actions'))->button(),
         ];
+    }
+
+    /**
+     * Get the action for checking all plugin updates.
+     */
+    public static function checkForUpdates(): Action
+    {
+        return Action::make('check_all_updates')
+            ->label(__('Check for Updates'))
+            ->icon('heroicon-o-arrow-path')
+            ->requiresConfirmation()
+            ->modalHeading(__('Check Plugin Updates'))
+            ->modalDescription(__('This will query GitHub for the latest release of every plugin that has a repository configured. Continue?'))
+            ->action(function (PluginUpdateChecker $checker): void {
+                $results = $checker->checkAll();
+
+                $updatesFound = collect($results)->filter(fn (array $r): bool => $r['update_available'] ?? false)->count();
+                $errors = collect($results)->filter(fn (array $r): bool => filled($r['error'] ?? null))->count();
+
+                $message = trans_choice(':count update available.|:count updates available.', $updatesFound, ['count' => $updatesFound]);
+                if ($errors > 0) {
+                    $message .= ' '.trans_choice(':count plugin had an error.|:count plugins had errors.', $errors, ['count' => $errors]);
+                }
+
+                $notification = Notification::make()
+                    ->title(__('Plugin Update Check Complete'))
+                    ->body($message);
+
+                $errors > 0 ? $notification->warning() : $notification->success();
+
+                $notification->send();
+            });
     }
 
     /**
