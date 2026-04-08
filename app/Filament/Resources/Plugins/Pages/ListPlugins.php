@@ -22,6 +22,7 @@ class ListPlugins extends ListRecords
     {
         return [
             PluginInstallActions::discover(),
+            PluginInstallActions::checkForUpdates(),
             PluginInstallActions::pluginInstallsLink(),
         ];
     }
