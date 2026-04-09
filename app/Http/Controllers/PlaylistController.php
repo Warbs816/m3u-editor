@@ -398,6 +398,7 @@ class PlaylistController extends Controller
             groupId: $groupId,
             weightedConfig: $weightedConfig,
             newChannelsOnly: $newChannelsOnly,
+            regexPatterns: ! empty($config['regex_patterns']) ? $config['regex_patterns'] : null,
         ));
 
         return response()->json([

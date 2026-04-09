@@ -191,6 +191,7 @@ class SyncListener
             preferCatchupAsPrimary: $preferCatchupAsPrimary,
             weightedConfig: $weightedConfig,
             newChannelsOnly: $newChannelsOnly,
+            regexPatterns: ! empty($config['regex_patterns'] ?? []) ? $config['regex_patterns'] : null,
         );
     }
 

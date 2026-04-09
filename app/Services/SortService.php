@@ -18,19 +18,20 @@ class SortService
         $direction = strtoupper($order) === 'DESC' ? 'DESC' : 'ASC';
         $driver = DB::getPdo()->getAttribute(\PDO::ATTR_DRIVER_NAME);
 
-        // Determine order by column, handling special cases
-        $orderByColumn = match ($column) {
-            'title' => 'COALESCE(title_custom, title)',
-            'name' => 'COALESCE(name_custom, name)',
-            'stream_id' => 'COALESCE(stream_id_custom, stream_id)',
-            default => $column,
+        // Determine order by column, handling special cases.
+        // IMPORTANT: $column is whitelisted here because its value is interpolated
+        // directly into raw SQL below; never fall through unknown values.
+        [$orderByColumn, $lowerOrderByColumn] = match ($column) {
+            'title', null => ['COALESCE(title_custom, title)', 'LOWER(COALESCE(title_custom, title))'],
+            'name' => ['COALESCE(name_custom, name)', 'LOWER(COALESCE(name_custom, name))'],
+            'stream_id' => ['COALESCE(stream_id_custom, stream_id)', 'LOWER(COALESCE(stream_id_custom, stream_id))'],
+            'channel' => ['channel', 'channel'],
+            default => throw new \InvalidArgumentException('Invalid sort column provided.'),
         };
-
-        $lowerOrderByColumn = "LOWER({$orderByColumn})";
 
         // MySQL (8+)
         if ($driver === 'mysql') {
-            DB::statement("UPDATE channels c JOIN (SELECT id, ROW_NUMBER() OVER (ORDER BY LOWER({$orderByColumn}) {$direction}) AS rn FROM channels WHERE group_id = ?) t ON c.id = t.id SET c.sort = t.rn", [$record->id]);
+            DB::statement("UPDATE channels c JOIN (SELECT id, ROW_NUMBER() OVER (ORDER BY {$lowerOrderByColumn} {$direction}) AS rn FROM channels WHERE group_id = ?) t ON c.id = t.id SET c.sort = t.rn", [$record->id]);
 
             return;
         }

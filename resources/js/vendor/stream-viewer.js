@@ -18,6 +18,7 @@ function streamPlayer() {
         availableAudioTracks: [],
         selectedAudioTrack: null,
         fragmentErrorCount: 0,
+        _videoHandlers: {},
 
         // ── Watch Progress ────────────────────────────────────────────────
         progressConfig: null,   // { contentType, streamId, playlistId, seriesId, seasonNumber }
@@ -204,9 +205,9 @@ function streamPlayer() {
             this._initProgress();
 
             // Update status
-            !!statusEl && (statusEl.textContent = 'Connecting...');
-            !!loadingEl && (loadingEl.style.display = 'flex');
-            !!errorEl && (errorEl.style.display = 'none');
+            if (statusEl) statusEl.textContent = 'Connecting...';
+            if (loadingEl) loadingEl.style.display = 'flex';
+            if (errorEl) errorEl.style.display = 'none';
             try {
                 // Use the explicit format parameter as authoritative. Only fall back to
                 // URL sniffing when no format is provided — the URL extension is an
@@ -474,76 +475,72 @@ function streamPlayer() {
         },
 
         setupNativeEvents(video, playerId) {
-            video.addEventListener('loadstart', () => {
-                this.updateStatus(playerId, 'Loading...');
-            });
+            // Remove any previously attached handlers to prevent listener stacking
+            this._removeVideoHandlers(video);
 
-            video.addEventListener('loadedmetadata', () => {
-                // Collect basic metadata
-                if (video.videoWidth && video.videoHeight) {
-                    this.streamMetadata.resolution = `${video.videoWidth}x${video.videoHeight}`;
-                }
-
-                this.collectVideoMetadata(video, playerId);
-                this.hideLoading(playerId);
-                this.updateStatus(playerId, 'Ready');
-                this.updateStreamDetails(playerId);
-            });
-
-            video.addEventListener('loadeddata', () => {
-                this.collectVideoMetadata(video, playerId);
-            });
-
-            video.addEventListener('canplay', () => {
-                this.updateStatus(playerId, 'Ready');
-                this.collectVideoMetadata(video, playerId);
-            });
-
-            video.addEventListener('playing', () => {
-                this.updateStatus(playerId, 'Playing');
-                this._startProgressTimer();
-
-                // Try to collect additional metadata once playing
-                setTimeout(() => {
-                    this.collectVideoMetadata(video, playerId);
-                }, 1000); // Give it a second to establish the stream
-            });
-
-            video.addEventListener('pause', () => {
-                this._saveProgress(true);
-            });
-
-            video.addEventListener('ended', () => {
-                this._saveProgress(true);
-            });
-
-            video.addEventListener('progress', () => {
-                // Try to collect metadata as data loads
-                if (video.buffered.length > 0 && !this.streamMetadata.codec) {
-                    this.collectVideoMetadata(video, playerId);
-                }
-            });
-
-            video.addEventListener('error', (e) => {
-                if (!video.error || video.error.code === video.error.MEDIA_ERR_ABORTED) {
-                    return; // Ignore abort errors which can happen during cleanup
-                }
-                let errorMessage = 'Playback failed';
-                if (video.error) {
-                    switch (video.error.code) {
-                        case video.error.MEDIA_ERR_NETWORK:
-                            errorMessage = 'Network error';
-                            break;
-                        case video.error.MEDIA_ERR_DECODE:
-                            errorMessage = 'Decode error';
-                            break;
-                        case video.error.MEDIA_ERR_SRC_NOT_SUPPORTED:
-                            errorMessage = 'Format not supported';
-                            break;
+            this._videoHandlers = {
+                loadstart: () => {
+                    this.updateStatus(playerId, 'Loading...');
+                },
+                loadedmetadata: () => {
+                    if (video.videoWidth && video.videoHeight) {
+                        this.streamMetadata.resolution = `${video.videoWidth}x${video.videoHeight}`;
                     }
-                }
-                this.showError(playerId, errorMessage);
-            });
+                    this.collectVideoMetadata(video, playerId);
+                    this.hideLoading(playerId);
+                    this.updateStatus(playerId, 'Ready');
+                    this.updateStreamDetails(playerId);
+                },
+                loadeddata: () => {
+                    this.collectVideoMetadata(video, playerId);
+                },
+                canplay: () => {
+                    this.updateStatus(playerId, 'Ready');
+                    this.collectVideoMetadata(video, playerId);
+                },
+                playing: () => {
+                    this.updateStatus(playerId, 'Playing');
+                    this._startProgressTimer();
+                    setTimeout(() => {
+                        this.collectVideoMetadata(video, playerId);
+                    }, 1000);
+                },
+                pause: () => {
+                    this._saveProgress(true);
+                },
+                ended: () => {
+                    this._saveProgress(true);
+                },
+                progress: () => {
+                    if (video.buffered.length > 0 && !this.streamMetadata.codec) {
+                        this.collectVideoMetadata(video, playerId);
+                    }
+                },
+                error: () => {
+                    if (!video.error || video.error.code === video.error.MEDIA_ERR_ABORTED) {
+                        return;
+                    }
+                    const errorMessages = {
+                        [video.error.MEDIA_ERR_NETWORK]: 'Network error',
+                        [video.error.MEDIA_ERR_DECODE]: 'Decode error',
+                        [video.error.MEDIA_ERR_SRC_NOT_SUPPORTED]: 'Format not supported',
+                    };
+                    const errorMessage = errorMessages[video.error.code] ?? 'Playback failed';
+                    this.showError(playerId, errorMessage);
+                },
+            };
+
+            for (const [event, handler] of Object.entries(this._videoHandlers)) {
+                video.addEventListener(event, handler);
+            }
+        },
+
+        _removeVideoHandlers(video) {
+            if (!video) return;
+            for (const [event, handler] of Object.entries(this._videoHandlers)) {
+                video.removeEventListener(event, handler);
+            }
+            this._videoHandlers = {};
         },
 
         hideLoading(playerId) {
@@ -815,6 +812,9 @@ function streamPlayer() {
                 }
                 this.mpegts = null;
             }
+
+            // Remove video event listeners before clearing the element
+            this._removeVideoHandlers(this.player);
 
             // Also pause and clear any video element that might be playing
             if (this.player && this.player.tagName === 'VIDEO') {

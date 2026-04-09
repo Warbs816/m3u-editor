@@ -2,9 +2,11 @@
 function multiStreamManager() {
     return {
         players: [],
+        maxPlayers: 0,
         zIndexCounter: 1000,
         _initialized: false,
         _abortController: null,
+        _lastClickPos: { x: 0, y: 0 },
         dragState: {
             isDragging: false,
             playerId: null,
@@ -26,6 +28,12 @@ function multiStreamManager() {
             // Only initialize if not already done for this instance
             if (this._initialized) {
                 return;
+            }
+
+            // Read max players from container data attribute
+            const container = document.querySelector('[data-max-players]');
+            if (container) {
+                this.maxPlayers = parseInt(container.dataset.maxPlayers, 0) || 0;
             }
 
             // Abort any previous listeners (safety net in case cleanup wasn't called)
@@ -68,9 +76,16 @@ function multiStreamManager() {
             // Reposition players when viewport shrinks
             window.addEventListener('resize', () => this.constrainAllToViewport(), { signal });
 
+            // Track last click position for tooltip positioning
+            document.addEventListener('click', (e) => { this._lastClickPos = { x: e.clientX, y: e.clientY }; }, { signal, capture: true });
+
             // Global mouse events for drag and resize
             document.addEventListener('mousemove', (e) => this.handleMouseMove(e), { signal });
             document.addEventListener('mouseup', () => this.handleMouseUp(), { signal });
+
+            // Global touch events for drag and resize (mobile/tablet support)
+            document.addEventListener('touchmove', (e) => this.handleTouchMove(e), { signal, passive: false });
+            document.addEventListener('touchend', () => this.handleMouseUp(), { signal });
 
             // Mark as initialized
             this._initialized = true;
@@ -81,6 +96,12 @@ function multiStreamManager() {
             const existingPlayer = this.players.find(p => p.url === channelData.url);
             if (existingPlayer) {
                 this.bringToFront(existingPlayer.id);
+                return;
+            }
+
+            // Enforce max concurrent player limit (0 = unlimited)
+            if (this.maxPlayers > 0 && this.players.length >= this.maxPlayers) {
+                this.showLimitMessage();
                 return;
             }
 
@@ -130,7 +151,7 @@ function multiStreamManager() {
             }
         },
 
-        closeStream(playerId) {
+        closeStream(playerId, { notifyServer = true } = {}) {
             const playerIndex = this.players.findIndex(p => p.id === playerId);
             if (playerIndex !== -1) {
                 const player = this.players[playerIndex];
@@ -138,11 +159,13 @@ function multiStreamManager() {
                 // Exit PiP if this player is in PiP mode
                 const videoElement = document.getElementById(player.id + '-video');
                 if (document.pictureInPictureElement === videoElement) {
-                    document.exitPictureInPicture().catch(() => {});
+                    document.exitPictureInPicture().catch(() => { });
                 }
 
-                // Notify server to stop the proxy stream (best-effort via sendBeacon)
-                this.notifyServerStreamStop(player);
+                // Notify server to stop the proxy stream (skip for transfers to pop-out)
+                if (notifyServer) {
+                    this.notifyServerStreamStop(player);
+                }
                 if (videoElement && videoElement._streamPlayer) {
                     videoElement._streamPlayer.cleanup();
                 }
@@ -225,6 +248,38 @@ function multiStreamManager() {
             }
         },
 
+        showLimitMessage() {
+            const existing = document.getElementById('floating-player-limit-msg');
+            if (existing) existing.remove();
+
+            const msg = document.createElement('div');
+            msg.id = 'floating-player-limit-msg';
+            msg.textContent = `Player limit reached (${this.maxPlayers}). Close one to open another.`;
+            Object.assign(msg.style, {
+                position: 'fixed',
+                background: 'rgba(0, 0, 0, 0.9)',
+                color: '#fff',
+                padding: '6px 12px',
+                borderRadius: '6px',
+                fontSize: '12px',
+                zIndex: '99999',
+                pointerEvents: 'none',
+                whiteSpace: 'nowrap',
+                transition: 'opacity 0.3s',
+            });
+            document.body.appendChild(msg);
+
+            // Position above the last click location
+            const pos = this._lastClickPos;
+            const msgRect = msg.getBoundingClientRect();
+            const vw = document.documentElement.clientWidth;
+            msg.style.left = Math.max(8, Math.min(pos.x - msgRect.width / 2, vw - msgRect.width - 8)) + 'px';
+            msg.style.top = Math.max(8, pos.y - msgRect.height - 12) + 'px';
+
+            setTimeout(() => { msg.style.opacity = '0'; }, 2000);
+            setTimeout(() => { msg.remove(); }, 2300);
+        },
+
         bringToFront(playerId) {
             const player = this.players.find(p => p.id === playerId);
             if (player) {
@@ -246,11 +301,11 @@ function multiStreamManager() {
             const player = this.players.find(p => p.id === playerId);
 
             if (document.pictureInPictureElement === videoElement) {
-                document.exitPictureInPicture().catch(() => {});
+                document.exitPictureInPicture().catch(() => { });
             } else if (document.pictureInPictureEnabled) {
                 videoElement.requestPictureInPicture().then(() => {
                     if (player) player.isPiP = true;
-                }).catch(() => {});
+                }).catch(() => { });
 
                 // Listen for PiP exit (user closes PiP window or we call exitPiP)
                 videoElement.addEventListener('leavepictureinpicture', () => {
@@ -264,8 +319,9 @@ function multiStreamManager() {
                 return;
             }
 
-            // Close the current floating player
-            this.closeStream(player.id);
+            // Close the floating player locally without telling the proxy to stop —
+            // the pop-out window will pick up the same stream.
+            this.closeStream(player.id, { notifyServer: false });
 
             const params = new URLSearchParams({
                 title: player.title ?? '',
@@ -283,7 +339,6 @@ function multiStreamManager() {
             window.open(popoutRoute + '?' + params.toString(), '_blank', 'noopener');
         },
 
-        // Drag functionality
         startDrag(playerId, event) {
             event.preventDefault();
             this.bringToFront(playerId);
@@ -291,17 +346,17 @@ function multiStreamManager() {
             const player = this.players.find(p => p.id === playerId);
             if (!player) return;
 
+            const point = event.touches?.[0] ?? event;
             this.dragState = {
                 isDragging: true,
                 playerId: playerId,
-                startX: event.clientX,
-                startY: event.clientY,
+                startX: point.clientX,
+                startY: point.clientY,
                 startLeft: player.position.x,
                 startTop: player.position.y
             };
         },
 
-        // Resize functionality
         startResize(playerId, event) {
             event.preventDefault();
             event.stopPropagation();
@@ -310,14 +365,21 @@ function multiStreamManager() {
             const player = this.players.find(p => p.id === playerId);
             if (!player) return;
 
+            const point = event.touches?.[0] ?? event;
             this.resizeState = {
                 isResizing: true,
                 playerId: playerId,
-                startX: event.clientX,
-                startY: event.clientY,
+                startX: point.clientX,
+                startY: point.clientY,
                 startWidth: player.size.width,
                 startHeight: player.size.height
             };
+        },
+
+        handleTouchMove(event) {
+            if (!this.dragState.isDragging && !this.resizeState.isResizing) return;
+            event.preventDefault();
+            this.handleMouseMove(event.touches[0]);
         },
 
         constrainAllToViewport() {
