@@ -45,6 +45,11 @@ class StreamProfile extends Model
         return $this->hasMany(PlaylistAlias::class);
     }
 
+    public function channels(): HasMany
+    {
+        return $this->hasMany(Channel::class);
+    }
+
     /**
      * Get template variables for FFmpeg profile rendering.
      * The 'args' field can store either:

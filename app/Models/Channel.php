@@ -44,10 +44,12 @@ class Channel extends Model
         'playlist_id' => 'integer',
         'network_id' => 'integer',
         'group_id' => 'integer',
+        'stream_profile_id' => 'integer',
         'extvlcopt' => 'array',
         'kodidrop' => 'array',
         'is_custom' => 'boolean',
         'is_vod' => 'boolean',
+        'enable_proxy' => 'boolean',
         'tmdb_id' => 'integer',
         'tvdb_id' => 'integer',
         'info' => 'array',
@@ -65,6 +67,32 @@ class Channel extends Model
     public function user(): BelongsTo
     {
         return $this->belongsTo(User::class);
+    }
+
+    public function streamProfile(): BelongsTo
+    {
+        return $this->belongsTo(StreamProfile::class);
+    }
+
+    /**
+     * Determine whether the proxy is effectively enabled for this channel.
+     * Returns true if either the channel itself or its parent playlist has proxy enabled.
+     */
+    public function isProxyEnabled(): bool
+    {
+        if ($this->enable_proxy) {
+            return true;
+        }
+
+        if ($this->playlist_id !== null && ! $this->relationLoaded('playlist')) {
+            $this->load('playlist');
+        } elseif ($this->custom_playlist_id !== null && ! $this->relationLoaded('customPlaylist')) {
+            $this->load('customPlaylist');
+        }
+
+        $playlist = $this->getEffectivePlaylist();
+
+        return (bool) ($playlist?->enable_proxy ?? false);
     }
 
     public function playlist(): BelongsTo

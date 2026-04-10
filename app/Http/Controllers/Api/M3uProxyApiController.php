@@ -35,6 +35,7 @@ class M3uProxyApiController extends Controller
         $channel = Channel::query()->with([
             'playlist',
             'customPlaylist',
+            'streamProfile',
         ])->findOrFail($id);
 
         // Get username from request (query parameter or header as fallback)
@@ -57,14 +58,15 @@ class M3uProxyApiController extends Controller
             $playlist->load('streamProfile', 'vodStreamProfile');
         }
 
-        // Get stream profile from playlist if set
-        $profile = null;
-        if ($channel->is_vod) {
-            // For VOD channels, use the VOD stream profile if set
-            $profile = $playlist->vodStreamProfile;
-        } else {
-            // Get stream profile from playlist if set
-            $profile = $playlist->streamProfile;
+        // Channel-level profile takes priority over the playlist-level profile.
+        // If neither is set, the stream is proxied directly without transcoding.
+        $profile = $channel->streamProfile;
+        if ($profile === null) {
+            if ($channel->is_vod) {
+                $profile = $playlist->vodStreamProfile;
+            } else {
+                $profile = $playlist->streamProfile;
+            }
         }
 
         $url = app(M3uProxyService::class)

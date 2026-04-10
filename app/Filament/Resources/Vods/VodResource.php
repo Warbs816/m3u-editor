@@ -22,6 +22,7 @@ use App\Models\ChannelFailover;
 use App\Models\CustomPlaylist;
 use App\Models\Group;
 use App\Models\Playlist;
+use App\Models\StreamProfile;
 use App\Rules\CheckIfUrlOrLocalPath;
 use App\Services\DateFormatService;
 use App\Services\LogoCacheService;
@@ -162,7 +163,11 @@ class VodResource extends Resource implements CopilotResource
             ->modifyQueryUsing(function (Builder $query) {
                 $query->with([
                     'epgChannel' => fn ($q) => $q->select('id', 'name', 'icon', 'icon_custom'),
-                    'playlist' => fn ($q) => $q->select('id', 'name', 'uuid', 'auto_sort'),
+                    'playlist' => fn ($q) => $q->select('id', 'name', 'uuid', 'auto_sort', 'enable_proxy', 'user_id')
+                        ->with(['user' => fn ($uq) => $uq->select('id', 'is_admin', 'permissions')]),
+                    'customPlaylist' => fn ($q) => $q->select('id', 'name', 'uuid', 'enable_proxy', 'user_id')
+                        ->with(['user' => fn ($uq) => $uq->select('id', 'is_admin', 'permissions')]),
+                    'streamProfile' => fn ($q) => $q->select('id', 'name'),
                 ])
                     ->withCount(['failovers'])
                     ->where('is_vod', true);
@@ -243,6 +248,18 @@ class VodResource extends Resource implements CopilotResource
                     return 'heroicon-o-minus';
                 })
                 ->color(fn ($record): string => $record->has_metadata ? 'success' : 'gray'),
+            IconColumn::make('is_proxy_enabled')
+                ->label(__('Proxy'))
+                ->getStateUsing(fn ($record): bool => $record->isProxyEnabled())
+                ->boolean()
+                ->trueIcon('heroicon-o-shield-check')
+                ->falseIcon('heroicon-o-shield-exclamation')
+                ->trueColor('success')
+                ->falseColor('gray')
+                ->tooltip(fn ($record): string => $record->isProxyEnabled() ? 'Proxy enabled' : 'Proxy disabled')
+                ->toggleable(isToggledHiddenByDefault: false)
+                ->sortable(false)
+                ->hidden(fn () => ! auth()->user()->canUseProxy()),
             IconColumn::make('has_tmdb_id')
                 ->label(__('TMDB'))
                 ->boolean()
@@ -1538,6 +1555,34 @@ class VodResource extends Resource implements CopilotResource
                         ->dehydrated(false) // don't save the value in the database
                         ->type('url')
                         ->hiddenOn('create'),
+                ]),
+            Fieldset::make(__('Proxy Settings'))
+                ->columns(2)
+                ->hidden(fn () => ! auth()->user()->canUseProxy())
+                ->schema([
+                    Toggle::make('enable_proxy')
+                        ->label(__('Enable Stream Proxy'))
+                        ->columnSpanFull()
+                        ->live()
+                        ->formatStateUsing(fn ($state, $record): bool => (bool) $state || (bool) ($record?->playlist?->enable_proxy ?? false))
+                        ->hint(fn (Get $get, $record): string => ($get('enable_proxy') || $record?->playlist?->enable_proxy) ? 'Proxied' : 'Not proxied')
+                        ->hintIcon(fn (Get $get, $record): string => ($get('enable_proxy') || $record?->playlist?->enable_proxy) ? 'heroicon-m-lock-closed' : 'heroicon-m-lock-open')
+                        ->helperText(fn ($record): string => $record?->playlist?->enable_proxy
+                            ? 'Proxy is enabled on the parent playlist. All channels in this playlist are already proxied. You can still select a stream profile override below.'
+                            : 'When enabled, all streams will be proxied through the application. This allows for better compatibility with various clients and enables features such as stream limiting and output format selection.')
+                        ->disabled(fn ($record): bool => (bool) ($record?->playlist?->enable_proxy ?? false))
+                        ->dehydrated()
+                        ->inline(false)
+                        ->default(false),
+                    Select::make('stream_profile_id')
+                        ->label(__('Stream Profile'))
+                        ->options(fn () => StreamProfile::where('user_id', auth()->id())->pluck('name', 'id'))
+                        ->searchable()
+                        ->preload()
+                        ->nullable()
+                        ->columnSpanFull()
+                        ->visible(fn (Get $get, $record): bool => (bool) $get('enable_proxy') || (bool) ($record?->playlist?->enable_proxy ?? false))
+                        ->helperText(__('Transcode this channel using the selected profile. Overrides the playlist-level stream profile for this channel. Leave empty for direct stream proxying.')),
                 ]),
             Fieldset::make(__('EPG Settings'))
                 ->schema([

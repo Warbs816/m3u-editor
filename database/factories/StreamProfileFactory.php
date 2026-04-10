@@ -25,7 +25,6 @@ class StreamProfileFactory extends Factory
             'name' => fake()->name(),
             'description' => fake()->text(),
             'args' => '{}',
-            'sort' => fake()->randomNumber(),
         ];
     }
 }

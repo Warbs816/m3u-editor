@@ -218,7 +218,7 @@ class XtreamStreamController extends Controller
         }
 
         if ($channel instanceof Channel) {
-            if ($playlist->enable_proxy || $request->input('proxy') === 'true') {
+            if ($channel->enable_proxy || $playlist->enable_proxy || $request->input('proxy') === 'true') {
                 // Timeshift handled in proxy controller (if needed)
                 // Add username to request for proxy traceability
                 $request->merge(['username' => $username]);
@@ -267,7 +267,7 @@ class XtreamStreamController extends Controller
         $format = $format ?? 'ts'; // Default to 'ts' if no format provided
         [$playlist, $channel] = $this->findAuthenticatedPlaylistAndStreamModel($username, $password, $streamId, 'vod');
         if ($channel instanceof Channel) {
-            if ($playlist->enable_proxy || $request->input('proxy') === 'true') {
+            if ($channel->enable_proxy || $playlist->enable_proxy || $request->input('proxy') === 'true') {
                 // Add username to request for proxy traceability
                 $request->merge(['username' => $username]);
 
