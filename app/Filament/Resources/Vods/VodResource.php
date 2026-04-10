@@ -154,7 +154,6 @@ class VodResource extends Resource implements CopilotResource
 
     public static function setupTable(Table $table, $relationId = null): Table
     {
-        // $livewire = $table->getLivewire();
         return $table->persistFiltersInSession()
             ->persistSortInSession()
             ->filtersTriggerAction(function ($action) {
@@ -240,13 +239,7 @@ class VodResource extends Resource implements CopilotResource
                 ->sortable(),
             IconColumn::make('has_metadata')
                 ->label(__('Metadata'))
-                ->icon(function ($record): string {
-                    if ($record->has_metadata) {
-                        return 'heroicon-o-check-circle';
-                    }
-
-                    return 'heroicon-o-minus';
-                })
+                ->icon(fn ($record): string => $record->has_metadata ? 'heroicon-o-check-circle' : 'heroicon-o-minus')
                 ->color(fn ($record): string => $record->has_metadata ? 'success' : 'gray'),
             IconColumn::make('is_proxy_enabled')
                 ->label(__('Proxy'))

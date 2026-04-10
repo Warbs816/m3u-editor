@@ -11,15 +11,6 @@ class StreamProfile extends Model
 {
     use HasFactory;
 
-    /**
-     * The attributes that should be cast to native types.
-     *
-     * @var array
-     */
-    protected $casts = [
-        // ...
-    ];
-
     public function user(): BelongsTo
     {
         return $this->belongsTo(User::class);
@@ -64,13 +55,6 @@ class StreamProfile extends Model
     public function getTemplateVariables(array $additionalVars = []): array
     {
         $variables = [];
-
-        // Try to parse args as JSON (for template variable overrides)
-        // if ($this->format === 'm3u8') {
-        //     $variables['output_format'] = 'hls';
-        // } else {
-        //     $variables['output_format'] = $this->format;
-        // }
 
         // Merge with additional variables (additional vars take precedence)
         return array_merge($variables, $additionalVars);

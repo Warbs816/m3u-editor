@@ -190,11 +190,9 @@ class Channel extends Model
     {
         $settings = app(GeneralSettings::class);
 
-        if ($this->is_vod) {
-            $profileId = $settings->default_vod_stream_profile_id ?? null;
-        } else {
-            $profileId = $settings->default_stream_profile_id ?? null;
-        }
+        $profileId = $this->is_vod
+            ? ($settings->default_vod_stream_profile_id ?? null)
+            : ($settings->default_stream_profile_id ?? null);
         $profile = $profileId ? StreamProfile::find($profileId) : null;
 
         // When no transcoding profile is set, the proxy delivers raw bytes (direct proxy),

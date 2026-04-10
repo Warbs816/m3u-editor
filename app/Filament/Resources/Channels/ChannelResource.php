@@ -148,7 +148,6 @@ class ChannelResource extends Resource implements CopilotResource
 
     public static function setupTable(Table $table, $relationId = null): Table
     {
-        // $livewire = $table->getLivewire();
         return $table->persistFiltersInSession()
             ->persistSortInSession()
             ->filtersTriggerAction(function ($action) {

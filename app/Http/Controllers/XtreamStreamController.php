@@ -120,7 +120,9 @@ class XtreamStreamController extends Controller
                 ->where('channels.id', $streamId) // Qualify column name if pivot table involved
                 ->where('enabled', true)
                 ->first();
-        } elseif ($streamType === 'episode') {
+        }
+
+        if ($streamType === 'episode') {
             $episode = Episode::with('season.series')->find($streamId);
             if (! $episode) {
                 return null; // Episode or its hierarchy not found
@@ -198,9 +200,6 @@ class XtreamStreamController extends Controller
      * @response 403 scenario="Forbidden/Unauthorized" {"error": "Unauthorized or stream not found"}
      *
      * @unauthenticated
-     */
-    /**
-     * Live stream requests.
      */
     public function handleLive(Request $request, string $username, string $password, string|int $streamId, ?string $format = null)
     {
