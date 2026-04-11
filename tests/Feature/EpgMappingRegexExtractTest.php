@@ -10,6 +10,21 @@ use App\Models\Playlist;
 use App\Models\User;
 use Illuminate\Support\Facades\Event;
 
+/**
+ * Helper: get the epg_channel_id from the first mapped record in job output,
+ * then verify it points to the expected EpgChannel by channel_id string.
+ */
+function assertMappedToEpgChannel(string $expectedChannelId): void
+{
+    $jobRecords = Job::where('batch_no', '!=', '')->get();
+    expect($jobRecords)->not->toBeEmpty();
+
+    $payload = $jobRecords->first()->payload;
+    $matched = EpgChannel::find($payload[0]['epg_channel_id']);
+    expect($matched)->not->toBeNull();
+    expect($matched->channel_id)->toBe($expectedChannelId);
+}
+
 beforeEach(function () {
     Event::fake();
     $this->user = User::factory()->create();
@@ -64,13 +79,7 @@ it('extracts capture group in regex extract mode and appends suffix', function (
 
     $job->handle();
 
-    // The job stores matched channels in Job records — verify one was created
-    $jobRecords = Job::where('batch_no', '!=', '')->get();
-    expect($jobRecords)->not->toBeEmpty();
-
-    // Verify the mapped EPG channel ID is correct
-    $payload = $jobRecords->first()->payload;
-    expect($payload[0]['epg_channel_id'])->toBe($epgChannel->id);
+    assertMappedToEpgChannel('OHIU-DT');
 });
 
 it('removes matched text in default regex mode (not extract)', function () {
@@ -110,11 +119,7 @@ it('removes matched text in default regex mode (not extract)', function () {
 
     $job->handle();
 
-    $jobRecords = Job::where('batch_no', '!=', '')->get();
-    expect($jobRecords)->not->toBeEmpty();
-
-    $payload = $jobRecords->first()->payload;
-    expect($payload[0]['epg_channel_id'])->toBe($epgChannel->id);
+    assertMappedToEpgChannel('local');
 });
 
 it('appends suffix without regex when only suffix is configured', function () {
@@ -152,9 +157,5 @@ it('appends suffix without regex when only suffix is configured', function () {
 
     $job->handle();
 
-    $jobRecords = Job::where('batch_no', '!=', '')->get();
-    expect($jobRecords)->not->toBeEmpty();
-
-    $payload = $jobRecords->first()->payload;
-    expect($payload[0]['epg_channel_id'])->toBe($epgChannel->id);
+    assertMappedToEpgChannel('espn-hd');
 });
