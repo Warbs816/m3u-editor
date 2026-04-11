@@ -16,6 +16,49 @@
     }
 }
 
+/* ── Ambient light from above ─────────────────────────────── */
+:root {
+    --fi-ambient-glow: rgba(99, 102, 241, 0.13);
+}
+
+.dark {
+    --fi-ambient-glow: rgba(99, 102, 241, 0.15);
+}
+
+body::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 600px;
+    background: radial-gradient(ellipse 80% 50% at 50% -5%, var(--fi-ambient-glow) 0%, transparent 100%);
+    pointer-events: none;
+    z-index: 0;
+}
+
+/* ── Glass topbar ─────────────────────────────────────────── */
+/* transform forces a GPU compositing layer; backdrop-filter requires one */
+.fi-topbar-ctn {
+    backdrop-filter: blur(14px) saturate(160%);
+    background-color: rgba(255, 255, 255, 0.75) !important;
+}
+
+.fi-topbar {
+    background-color: transparent !important;
+    box-shadow: none !important;
+}
+
+.dark .fi-topbar-ctn {
+    background-color: rgba(9, 9, 11, 0.65) !important;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+}
+
+.dark .fi-topbar {
+    background-color: transparent !important;
+    box-shadow: none !important;
+}
+
 /* Gradient backgrounds for dark mode */
 .dark {
 
