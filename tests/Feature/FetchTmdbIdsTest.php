@@ -27,10 +27,12 @@ beforeEach(function () {
         $mock->shouldReceive('getAttribute')->with('tmdb_language')->andReturn('en-US');
         $mock->shouldReceive('getAttribute')->with('tmdb_rate_limit')->andReturn(40);
         $mock->shouldReceive('getAttribute')->with('tmdb_confidence_threshold')->andReturn(80);
+        $mock->shouldReceive('getAttribute')->with('tmdb_organize_by_genre')->andReturn(false);
         $mock->tmdb_api_key = 'fake-api-key';
         $mock->tmdb_language = 'en-US';
         $mock->tmdb_rate_limit = 40;
         $mock->tmdb_confidence_threshold = 80;
+        $mock->tmdb_organize_by_genre = false;
     });
 });
 
@@ -672,6 +674,19 @@ it('enriches episodes even when series is skipped due to complete metadata', fun
 });
 
 it('re-enriches series genre when it is a library name placeholder', function () {
+    $this->mock(GeneralSettings::class, function ($mock) {
+        $mock->shouldReceive('getAttribute')->with('tmdb_api_key')->andReturn('fake-api-key');
+        $mock->shouldReceive('getAttribute')->with('tmdb_language')->andReturn('en-US');
+        $mock->shouldReceive('getAttribute')->with('tmdb_rate_limit')->andReturn(40);
+        $mock->shouldReceive('getAttribute')->with('tmdb_confidence_threshold')->andReturn(80);
+        $mock->shouldReceive('getAttribute')->with('tmdb_organize_by_genre')->andReturn(true);
+        $mock->tmdb_api_key = 'fake-api-key';
+        $mock->tmdb_language = 'en-US';
+        $mock->tmdb_rate_limit = 40;
+        $mock->tmdb_confidence_threshold = 80;
+        $mock->tmdb_organize_by_genre = true;
+    });
+
     Http::fake([
         'https://api.themoviedb.org/3/tv/1396?*' => Http::response([
             'id' => 1396,
@@ -725,6 +740,19 @@ it('re-enriches series genre when it is a library name placeholder', function ()
 });
 
 it('re-enriches VOD genre when it is a library name placeholder', function () {
+    $this->mock(GeneralSettings::class, function ($mock) {
+        $mock->shouldReceive('getAttribute')->with('tmdb_api_key')->andReturn('fake-api-key');
+        $mock->shouldReceive('getAttribute')->with('tmdb_language')->andReturn('en-US');
+        $mock->shouldReceive('getAttribute')->with('tmdb_rate_limit')->andReturn(40);
+        $mock->shouldReceive('getAttribute')->with('tmdb_confidence_threshold')->andReturn(80);
+        $mock->shouldReceive('getAttribute')->with('tmdb_organize_by_genre')->andReturn(true);
+        $mock->tmdb_api_key = 'fake-api-key';
+        $mock->tmdb_language = 'en-US';
+        $mock->tmdb_rate_limit = 40;
+        $mock->tmdb_confidence_threshold = 80;
+        $mock->tmdb_organize_by_genre = true;
+    });
+
     Http::fake([
         'https://api.themoviedb.org/3/movie/603*' => Http::response([
             'id' => 603,
@@ -877,4 +905,142 @@ it('skips episode enrichment when all episodes already have tmdb_id', function (
 
     // No HTTP calls should have been made (series and episodes both skipped)
     Http::assertNothingSent();
+});
+
+it('does not create genre groups when organize by genre is disabled', function () {
+    Http::fake([
+        'https://api.themoviedb.org/3/search/movie*' => Http::response([
+            'results' => [
+                [
+                    'id' => 603,
+                    'title' => 'The Matrix',
+                    'release_date' => '1999-03-30',
+                    'popularity' => 85.5,
+                ],
+            ],
+        ], 200),
+        'https://api.themoviedb.org/3/movie/603/external_ids*' => Http::response([
+            'imdb_id' => 'tt0133093',
+        ], 200),
+        'https://api.themoviedb.org/3/movie/603*' => Http::response([
+            'id' => 603,
+            'title' => 'The Matrix',
+            'overview' => 'A computer hacker learns about the true nature of reality.',
+            'poster_path' => '/matrix.jpg',
+            'genres' => [['id' => 28, 'name' => 'Action'], ['id' => 878, 'name' => 'Science Fiction']],
+        ], 200),
+    ]);
+
+    $originalGroup = Group::factory()->create([
+        'playlist_id' => $this->playlist->id,
+        'user_id' => $this->user->id,
+        'name' => 'My Movies',
+        'type' => 'vod',
+    ]);
+
+    $channel = Channel::factory()->create([
+        'playlist_id' => $this->playlist->id,
+        'user_id' => $this->user->id,
+        'is_vod' => true,
+        'title' => 'The Matrix',
+        'year' => 1999,
+        'group' => 'My Movies',
+        'group_internal' => 'My Movies',
+        'group_id' => $originalGroup->id,
+        'info' => [],
+    ]);
+
+    // tmdb_organize_by_genre defaults to false in beforeEach
+
+    $job = new FetchTmdbIds(
+        vodChannelIds: [$channel->id],
+        overwriteExisting: false,
+        user: $this->user,
+    );
+
+    $job->handle(app(TmdbService::class));
+
+    $channel->refresh();
+
+    // Metadata should be fetched
+    expect($channel->tmdb_id)->toBe(603)
+        ->and($channel->info['plot'])->toBe('A computer hacker learns about the true nature of reality.')
+        ->and($channel->info['genre'])->toBe('Action, Science Fiction');
+
+    // Group assignment should be unchanged
+    expect($channel->group_id)->toBe($originalGroup->id)
+        ->and($channel->group)->toBe('My Movies')
+        ->and($channel->group_internal)->toBe('My Movies');
+
+    // No genre-based group should have been created
+    expect(Group::where('name', 'Action')->where('playlist_id', $this->playlist->id)->exists())->toBeFalse();
+});
+
+it('creates genre groups when organize by genre is enabled', function () {
+    $this->mock(GeneralSettings::class, function ($mock) {
+        $mock->shouldReceive('getAttribute')->with('tmdb_api_key')->andReturn('fake-api-key');
+        $mock->shouldReceive('getAttribute')->with('tmdb_language')->andReturn('en-US');
+        $mock->shouldReceive('getAttribute')->with('tmdb_rate_limit')->andReturn(40);
+        $mock->shouldReceive('getAttribute')->with('tmdb_confidence_threshold')->andReturn(80);
+        $mock->shouldReceive('getAttribute')->with('tmdb_organize_by_genre')->andReturn(true);
+        $mock->tmdb_api_key = 'fake-api-key';
+        $mock->tmdb_language = 'en-US';
+        $mock->tmdb_rate_limit = 40;
+        $mock->tmdb_confidence_threshold = 80;
+        $mock->tmdb_organize_by_genre = true;
+    });
+
+    Http::fake([
+        'https://api.themoviedb.org/3/search/movie*' => Http::response([
+            'results' => [
+                [
+                    'id' => 603,
+                    'title' => 'The Matrix',
+                    'release_date' => '1999-03-30',
+                    'popularity' => 85.5,
+                ],
+            ],
+        ], 200),
+        'https://api.themoviedb.org/3/movie/603/external_ids*' => Http::response([
+            'imdb_id' => 'tt0133093',
+        ], 200),
+        'https://api.themoviedb.org/3/movie/603*' => Http::response([
+            'id' => 603,
+            'title' => 'The Matrix',
+            'overview' => 'A computer hacker learns about the true nature of reality.',
+            'poster_path' => '/matrix.jpg',
+            'genres' => [['id' => 28, 'name' => 'Action'], ['id' => 878, 'name' => 'Science Fiction']],
+        ], 200),
+    ]);
+
+    $channel = Channel::factory()->create([
+        'playlist_id' => $this->playlist->id,
+        'user_id' => $this->user->id,
+        'is_vod' => true,
+        'title' => 'The Matrix',
+        'year' => 1999,
+        'group' => 'Uncategorized',
+        'group_internal' => 'Uncategorized',
+        'info' => [],
+    ]);
+
+    $job = new FetchTmdbIds(
+        vodChannelIds: [$channel->id],
+        overwriteExisting: false,
+        user: $this->user,
+    );
+
+    $job->handle(app(TmdbService::class));
+
+    $channel->refresh();
+
+    // Metadata should be fetched
+    expect($channel->tmdb_id)->toBe(603)
+        ->and($channel->info['genre'])->toBe('Action, Science Fiction');
+
+    // Group should be reassigned to the primary TMDB genre
+    $actionGroup = Group::where('name', 'Action')->where('playlist_id', $this->playlist->id)->first();
+    expect($actionGroup)->not->toBeNull()
+        ->and($channel->group_id)->toBe($actionGroup->id)
+        ->and($channel->group)->toBe('Action');
 });

@@ -1300,6 +1300,10 @@ class Preferences extends SettingsPage
                                             ->label(__('Auto-lookup on metadata fetch'))
                                             ->helperText(__('Automatically lookup TMDB IDs when fetching metadata for VOD and Series. This may slow down imports and metadata fetching for large playlists. Will only be fetched for enabled items.'))
                                             ->default(false),
+                                        Toggle::make('tmdb_organize_by_genre')
+                                            ->label(__('Organize by genre'))
+                                            ->helperText(__('When enabled, TMDB genres will be used to create groups/categories and reassign VOD and Series to them. When disabled, metadata is still fetched but your existing group organization is preserved.'))
+                                            ->default(false),
                                         TextInput::make('tmdb_rate_limit')
                                             ->label(__('Rate Limit (requests/second)'))
                                             ->placeholder(__('40'))
