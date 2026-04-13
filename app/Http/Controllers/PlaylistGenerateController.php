@@ -283,7 +283,7 @@ class PlaylistGenerateController extends Controller
                         ->get();
 
                     foreach ($series as $s) {
-                        // Get season movie DB ID's as fallbacks for episode
+                        // Get series movie DB ID's as fallbacks for episode
                         $movieDbIds = $s->getMovieDbIds() ?? [];
                         $seriesTmdbId = $movieDbIds['tmdb'] ?? $movieDbIds['tvdb'] ?? $movieDbIds['imdb'] ?? null;
 
