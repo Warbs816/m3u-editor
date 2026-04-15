@@ -833,7 +833,7 @@ class ChannelResource extends Resource implements CopilotResource
                     ->modalDescription(__('Set the timeshift value for the selected channels. Use 0 to disable catch-up.'))
                     ->modalSubmitActionLabel(__('Set timeshift')),
                 BulkAction::make('set-epg-shift')
-                    ->label(__('Set EPG Shift'))
+                    ->label(__('Set EPG shift'))
                     ->schema([
                         TextInput::make('tvg_shift')
                             ->label(__('EPG Shift value'))
@@ -860,7 +860,7 @@ class ChannelResource extends Resource implements CopilotResource
                     ->icon('heroicon-o-clock')
                     ->modalIcon('heroicon-o-clock')
                     ->modalDescription(__('Set the EPG time shift (tvg-shift) for the selected channels. This shifts the EPG program schedule by the specified number of hours.'))
-                    ->modalSubmitActionLabel(__('Set EPG Shift')),
+                    ->modalSubmitActionLabel(__('Set EPG shift')),
             ]),
 
             // -- Find & Replace --
