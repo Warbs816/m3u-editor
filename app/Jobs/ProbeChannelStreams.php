@@ -135,23 +135,7 @@ class ProbeChannelStreams implements ShouldQueue
             })
             ->catch(function (Batch $batch, Throwable $e) use ($userId) {
                 Log::error("ProbeChannelStreams batch failed: {$e->getMessage()}");
-
-                if (! $userId) {
-                    return;
-                }
-
-                $user = User::find($userId);
-
-                if (! $user) {
-                    return;
-                }
-
-                Notification::make()
-                    ->danger()
-                    ->title(__('Stream probing failed'))
-                    ->body($e->getMessage())
-                    ->broadcast($user)
-                    ->sendToDatabase($user);
+                self::notifyUserOfFailure($userId, $e->getMessage());
             })
             ->onConnection('redis')
             ->onQueue('import')
@@ -190,23 +174,7 @@ class ProbeChannelStreams implements ShouldQueue
             ->onQueue('import')
             ->catch(function (Throwable $e) use ($userId) {
                 Log::error("ProbeChannelStreams chain failed: {$e->getMessage()}");
-
-                if (! $userId) {
-                    return;
-                }
-
-                $user = User::find($userId);
-
-                if (! $user) {
-                    return;
-                }
-
-                Notification::make()
-                    ->danger()
-                    ->title(__('Stream probing failed'))
-                    ->body($e->getMessage())
-                    ->broadcast($user)
-                    ->sendToDatabase($user);
+                self::notifyUserOfFailure($userId, $e->getMessage());
             })
             ->dispatch();
 
@@ -219,8 +187,20 @@ class ProbeChannelStreams implements ShouldQueue
     private function notifyFailed(?Playlist $playlist, string $message): void
     {
         Log::error("ProbeChannelStreams failed: {$message}");
+        self::notifyUserOfFailure($playlist?->user?->id, $message);
+    }
 
-        $user = $playlist?->user;
+    /**
+     * Send a danger notification to a user by ID (safe for use inside closures
+     * where $this cannot be serialized).
+     */
+    private static function notifyUserOfFailure(?int $userId, string $message): void
+    {
+        if (! $userId) {
+            return;
+        }
+
+        $user = User::find($userId);
         if (! $user) {
             return;
         }

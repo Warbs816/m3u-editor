@@ -98,11 +98,9 @@ class ProcessChannelScrubber implements ShouldQueue
                 ->sendToDatabase($scrubber->user);
 
             $channelIds = $query->pluck('id')->toArray();
-            $chunks = array_chunk($channelIds, 50);
 
-            $chunkJobs = [];
-            foreach ($chunks as $chunk) {
-                $chunkJobs[] = new ProcessChannelScrubberChunk(
+            $chunkJobs = collect(array_chunk($channelIds, 50))
+                ->map(fn (array $chunk) => new ProcessChannelScrubberChunk(
                     channelIds: $chunk,
                     scrubberId: $scrubber->id,
                     logId: $log->id,
@@ -112,8 +110,8 @@ class ProcessChannelScrubber implements ShouldQueue
                     probeTimeout: $scrubber->probe_timeout ?? 10,
                     disableDead: $scrubber->disable_dead ?? true,
                     enableLive: $scrubber->enable_live ?? false,
-                );
-            }
+                ))
+                ->all();
 
             if ($scrubber->use_batching) {
                 $this->dispatchAsBatch($chunkJobs, $scrubber, $log->id, $batchNo, $start);
@@ -168,33 +166,7 @@ class ProcessChannelScrubber implements ShouldQueue
                     start: $start,
                 ));
             })
-            ->catch(function (Batch $batch, Throwable $e) use ($scrubberId) {
-                $scrubber = ChannelScrubber::find($scrubberId);
-                if (! $scrubber) {
-                    return;
-                }
-
-                $error = "Error running scrubber \"{$scrubber->name}\": {$e->getMessage()}";
-
-                Notification::make()
-                    ->danger()
-                    ->title("Channel Scrubber \"{$scrubber->name}\" failed")
-                    ->body('Please view your notifications for details.')
-                    ->broadcast($scrubber->user);
-
-                Notification::make()
-                    ->danger()
-                    ->title("Channel Scrubber \"{$scrubber->name}\" failed")
-                    ->body($error)
-                    ->sendToDatabase($scrubber->user);
-
-                $scrubber->update([
-                    'status' => Status::Failed,
-                    'errors' => $error,
-                    'progress' => 100,
-                    'processing' => false,
-                ]);
-            })
+            ->catch(fn (Batch $batch, Throwable $e) => self::handleScrubberFailure($scrubberId, $e))
             ->onConnection('redis')
             ->onQueue('import')
             ->allowFailures()
@@ -216,47 +188,52 @@ class ProcessChannelScrubber implements ShouldQueue
     ): void {
         $scrubberId = $scrubber->id;
 
-        $jobs = [
+        Bus::chain([
             ...$chunkJobs,
             new ProcessChannelScrubberComplete(
-                scrubberId: $scrubber->id,
+                scrubberId: $scrubberId,
                 logId: $logId,
                 batchNo: $batchNo,
                 start: $start,
             ),
-        ];
-
-        Bus::chain($jobs)
+        ])
             ->onConnection('redis')
             ->onQueue('import')
-            ->catch(function (Throwable $e) use ($scrubberId) {
-                $scrubber = ChannelScrubber::find($scrubberId);
-                if (! $scrubber) {
-                    return;
-                }
-
-                $error = "Error running scrubber \"{$scrubber->name}\": {$e->getMessage()}";
-
-                Notification::make()
-                    ->danger()
-                    ->title("Channel Scrubber \"{$scrubber->name}\" failed")
-                    ->body('Please view your notifications for details.')
-                    ->broadcast($scrubber->user);
-
-                Notification::make()
-                    ->danger()
-                    ->title("Channel Scrubber \"{$scrubber->name}\" failed")
-                    ->body($error)
-                    ->sendToDatabase($scrubber->user);
-
-                $scrubber->update([
-                    'status' => Status::Failed,
-                    'errors' => $error,
-                    'progress' => 100,
-                    'processing' => false,
-                ]);
-            })
+            ->catch(fn (Throwable $e) => self::handleScrubberFailure($scrubberId, $e))
             ->dispatch();
+    }
+
+    /**
+     * Notify the scrubber owner of a failure and mark the scrubber as failed.
+     * Safe for use inside closures where $this cannot be serialized.
+     */
+    private static function handleScrubberFailure(int $scrubberId, Throwable $e): void
+    {
+        $scrubber = ChannelScrubber::find($scrubberId);
+        if (! $scrubber) {
+            return;
+        }
+
+        $error = "Error running scrubber \"{$scrubber->name}\": {$e->getMessage()}";
+
+        Notification::make()
+            ->danger()
+            ->title("Channel Scrubber \"{$scrubber->name}\" failed")
+            ->body('Please view your notifications for details.')
+            ->broadcast($scrubber->user);
+
+        Notification::make()
+            ->danger()
+            ->title("Channel Scrubber \"{$scrubber->name}\" failed")
+            ->body($error)
+            ->sendToDatabase($scrubber->user);
+
+        $scrubber->update([
+            'status' => Status::Failed,
+            'errors' => $error,
+            'progress' => 100,
+            'processing' => false,
+        ]);
     }
 
     /**
