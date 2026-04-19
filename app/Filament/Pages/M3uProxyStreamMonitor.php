@@ -264,18 +264,18 @@ class M3uProxyStreamMonitor extends Page
                 ->filter()
                 ->unique()
                 ->values();
-            $streamProfilesById = StreamProfile::whereIn('id', $streamProfileIds)
-                ->get(['id', 'format', 'backend'])
-                ->keyBy('id');
+            $streamProfilesById = $streamProfileIds->isNotEmpty()
+                ? StreamProfile::whereIn('id', $streamProfileIds)->get(['id', 'format', 'backend'])->keyBy('id')
+                : collect();
 
             $providerProfileIds = collect($apiStreams['streams'])
                 ->pluck('metadata.provider_profile_id')
                 ->filter()
                 ->unique()
                 ->values();
-            $providerProfilesById = PlaylistProfile::whereIn('id', $providerProfileIds)
-                ->get(['id', 'name', 'is_primary'])
-                ->keyBy('id');
+            $providerProfilesById = $providerProfileIds->isNotEmpty()
+                ? PlaylistProfile::whereIn('id', $providerProfileIds)->get(['id', 'name', 'is_primary'])->keyBy('id')
+                : collect();
 
             foreach ($apiStreams['streams'] as $stream) {
                 $streamId = $stream['stream_id'];
@@ -433,7 +433,7 @@ class M3uProxyStreamMonitor extends Page
                 ->unique()
                 ->values();
             $networksByUuid = Network::whereIn('uuid', $broadcastNetworkUuids)
-                ->get()
+                ->get(['uuid', 'name'])
                 ->keyBy('uuid');
 
             foreach ($apiBroadcasts['broadcasts'] as $bcast) {
