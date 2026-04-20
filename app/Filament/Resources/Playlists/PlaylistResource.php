@@ -27,6 +27,8 @@ use App\Livewire\PlaylistInfo;
 use App\Livewire\PlaylistM3uUrl;
 use App\Livewire\XtreamApiInfo;
 use App\Livewire\XtreamDnsStatus;
+use App\Models\Category;
+use App\Models\CustomPlaylist;
 use App\Models\Group;
 use App\Models\MediaServerIntegration;
 use App\Models\Playlist;
@@ -2268,6 +2270,150 @@ class PlaylistResource extends Resource implements CopilotResource
                             $disabled = ($state['enabled'] ?? true) ? '' : ' (disabled)';
 
                             return "{$targetLabel} — {$groupLabel}{$disabled}";
+                        }),
+                ]),
+
+            Section::make(__('Auto-Add to Custom Playlist'))
+                ->description(__('Configure groups to automatically sync into Custom Playlists after each successful sync. Each rule syncs the selected source group(s) into one Custom Playlist.'))
+                ->columnSpanFull()
+                ->collapsible()
+                ->collapsed($creating)
+                ->schema([
+                    Repeater::make('auto_sync_to_custom_config')
+                        ->label('')
+                        ->schema([
+                            Toggle::make('enabled')
+                                ->label(__('Enabled'))
+                                ->default(true)
+                                ->inline(false)
+                                ->columnSpan(1),
+                            Select::make('type')
+                                ->label(__('Source Type'))
+                                ->options([
+                                    'live_groups' => 'Live Groups',
+                                    'vod_groups' => 'VOD Groups',
+                                    'series_categories' => 'Series Categories',
+                                ])
+                                ->live()
+                                ->default('live_groups')
+                                ->required()
+                                ->afterStateUpdated(fn (Set $set) => $set('groups', []))
+                                ->columnSpan(2),
+                            Select::make('groups')
+                                ->label(__('Groups'))
+                                ->options(function (Get $get, ?Playlist $record): array {
+                                    if (! $record) {
+                                        return [];
+                                    }
+                                    $type = $get('type') ?? 'live_groups';
+                                    if ($type === 'series_categories') {
+                                        return Category::where('playlist_id', $record->id)
+                                            ->orderBy('name')
+                                            ->pluck('name', 'id')
+                                            ->toArray();
+                                    }
+
+                                    $groupType = $type === 'vod_groups' ? 'vod' : 'live';
+
+                                    return Group::where('playlist_id', $record->id)
+                                        ->where('type', $groupType)
+                                        ->orderBy('name')
+                                        ->pluck('name', 'id')
+                                        ->toArray();
+                                })
+                                ->multiple()
+                                ->searchable()
+                                ->required()
+                                ->columnSpan(4),
+                            Select::make('custom_playlist_id')
+                                ->label(__('Custom Playlist'))
+                                ->options(fn (?Playlist $record): array => CustomPlaylist::where('user_id', $record?->user_id ?? auth()->id())
+                                    ->orderBy('name')
+                                    ->pluck('name', 'id')
+                                    ->toArray()
+                                )
+                                ->live()
+                                ->required()
+                                ->searchable()
+                                ->afterStateUpdated(function (Set $set): void {
+                                    $set('mode', 'original');
+                                    $set('category', null);
+                                    $set('new_category', null);
+                                })
+                                ->columnSpan(4),
+                            Select::make('sync_mode')
+                                ->label(__('Sync Mode'))
+                                ->native(false)
+                                ->options([
+                                    'full_sync' => 'Sync (add & remove)',
+                                    'add_only' => 'Add only',
+                                ])
+                                ->default('full_sync')
+                                ->required()
+                                ->hintIcon('heroicon-m-question-mark-circle', tooltip: '"Sync" adds new channels and removes channels no longer in the source group. "Add only" never removes channels from the Custom Playlist.')
+                                ->columnSpan(3),
+                            Select::make('mode')
+                                ->label(__('Group Assignment'))
+                                ->options([
+                                    'original' => 'Use original group name',
+                                    'select' => 'Select existing group',
+                                    'create' => 'Create new group',
+                                ])
+                                ->default('original')
+                                ->live()
+                                ->native(false)
+                                ->required()
+                                ->visible(fn (Get $get): bool => (bool) $get('custom_playlist_id'))
+                                ->columnSpan(4),
+                            Select::make('category')
+                                ->label(__('Select Group'))
+                                ->required(fn (Get $get): bool => $get('mode') === 'select')
+                                ->visible(fn (Get $get): bool => (bool) $get('custom_playlist_id') && $get('mode') === 'select')
+                                ->options(function (Get $get): array {
+                                    $customPlaylist = CustomPlaylist::find($get('custom_playlist_id'));
+                                    if (! $customPlaylist) {
+                                        return [];
+                                    }
+                                    $tagFn = ($get('type') === 'series_categories') ? 'categoryTags' : 'groupTags';
+
+                                    return $customPlaylist->$tagFn()->get()
+                                        ->mapWithKeys(fn ($tag) => [$tag->getAttributeValue('name') => $tag->getAttributeValue('name')])
+                                        ->toArray();
+                                })
+                                ->searchable()
+                                ->columnSpan(4),
+                            TextInput::make('new_category')
+                                ->label(__('New Group Name'))
+                                ->required(fn (Get $get): bool => $get('mode') === 'create')
+                                ->visible(fn (Get $get): bool => (bool) $get('custom_playlist_id') && $get('mode') === 'create')
+                                ->columnSpan(4),
+                        ])
+                        ->columns(11)
+                        ->reorderable()
+                        ->reorderableWithButtons()
+                        ->collapsible()
+                        ->defaultItems(0)
+                        ->addActionLabel(__('Add auto-add rule'))
+                        ->itemLabel(function (array $state): ?string {
+                            $type = $state['type'] ?? null;
+                            if (! $type) {
+                                return null;
+                            }
+                            $typeLabel = match ($type) {
+                                'vod_groups' => 'VOD Groups',
+                                'series_categories' => 'Series Categories',
+                                default => 'Live Groups',
+                            };
+                            $groupIds = (array) ($state['groups'] ?? []);
+                            $groupCount = count($groupIds);
+                            $groupLabel = $groupCount === 0 ? 'No groups' : "{$groupCount} group".($groupCount === 1 ? '' : 's');
+                            $customPlaylistId = $state['custom_playlist_id'] ?? null;
+                            $customPlaylistName = $customPlaylistId
+                                ? (CustomPlaylist::find($customPlaylistId)?->name ?? "Playlist #{$customPlaylistId}")
+                                : 'No playlist';
+                            $disabled = ($state['enabled'] ?? true) ? '' : ' (disabled)';
+
+                            return "{$typeLabel} — {$groupLabel} → {$customPlaylistName}{$disabled}";
                         }),
                 ]),
         ];

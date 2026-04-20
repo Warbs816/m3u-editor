@@ -4,6 +4,7 @@ namespace App\Listeners;
 
 use App\Enums\Status;
 use App\Events\SyncCompleted;
+use App\Jobs\AutoSyncGroupsToCustomPlaylist;
 use App\Jobs\GenerateEpgCache;
 use App\Jobs\MergeChannels;
 use App\Jobs\ProbeChannelStreams;
@@ -35,6 +36,9 @@ class SyncListener
 
                 // Handle channel merge & scrubbers if enabled
                 $this->dispatchChannelScanJobs($playlist);
+
+                // Auto-sync configured groups to custom playlists
+                $this->dispatchAutoSyncToCustomPlaylistJobs($playlist);
 
                 // Sync Plex DVR channel maps (lineup may have changed)
                 dispatch(new SyncPlexDvrJob(trigger: 'playlist_sync'));
@@ -212,6 +216,46 @@ class SyncListener
             'prefer_codec' => $config['prefer_codec'] ?? null,
             'exclude_disabled_groups' => $config['exclude_disabled_groups'] ?? false,
         ];
+    }
+
+    /**
+     * Dispatch auto-sync jobs to push configured source groups into custom playlists.
+     * Runs after each successful playlist sync.
+     */
+    private function dispatchAutoSyncToCustomPlaylistJobs(Playlist $playlist): void
+    {
+        $rules = collect($playlist->auto_sync_to_custom_config ?? [])
+            ->filter(fn (array $rule): bool => $rule['enabled'] ?? false);
+
+        if ($rules->isEmpty()) {
+            return;
+        }
+
+        foreach ($rules as $rule) {
+            $customPlaylistId = (int) ($rule['custom_playlist_id'] ?? 0);
+            $groupIds = array_map('intval', (array) ($rule['groups'] ?? []));
+            $type = $rule['type'] === 'series_categories' ? 'series' : 'channel';
+            $syncMode = $rule['sync_mode'] ?? 'full_sync';
+            $data = [
+                'mode' => $rule['mode'] ?? 'original',
+                'category' => $rule['category'] ?? null,
+                'new_category' => $rule['new_category'] ?? null,
+            ];
+
+            if (! $customPlaylistId || empty($groupIds)) {
+                continue;
+            }
+
+            dispatch(new AutoSyncGroupsToCustomPlaylist(
+                userId: $playlist->user_id,
+                playlistId: $playlist->id,
+                groupIds: $groupIds,
+                customPlaylistId: $customPlaylistId,
+                data: $data,
+                type: $type,
+                syncMode: $syncMode,
+            ));
+        }
     }
 
     /**
