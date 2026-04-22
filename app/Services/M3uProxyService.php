@@ -814,9 +814,13 @@ class M3uProxyService
                 $url = PlaylistUrlService::getChannelUrl($channel, $playlist);
                 $format = $this->getFormatFromUrl($url);
 
-                // VOD channels: force /stream/ endpoint (see comment in direct stream creation path)
+                // VOD channels: force /stream/ endpoint using the real container extension
+                // (see comment in direct stream creation path). Passing 'hls'/'m3u8' through to
+                // buildProxyUrl would route to /hls/ which the proxy serves as a manifest — wrong
+                // for VOD bytes. Passing the container extension also hints to clients like SIPTV
+                // that the stream is VOD (seekable).
                 if (($channel->is_vod ?? false) && ($format === 'hls' || $format === 'm3u8')) {
-                    $format = 'raw';
+                    $format = $channel->container_extension ?? 'mp4';
                 }
 
                 return $this->buildProxyUrl($existingStreamId, $format, $username);
@@ -947,6 +951,12 @@ class M3uProxyService
 
                         if ($activeChannelStreams > 0) {
                             $format = $this->getFormatFromUrl($primaryUrl);
+
+                            // VOD channels must use the /stream/ endpoint with a real container
+                            // extension, not /hls/ — see buildProxyUrl docblock.
+                            if (($actualChannel->is_vod ?? false) && ($format === 'hls' || $format === 'm3u8')) {
+                                $format = $actualChannel->container_extension ?? 'mp4';
+                            }
 
                             return $this->buildProxyUrl($existingStreamId, $format, $username);
                         }
@@ -1152,8 +1162,10 @@ class M3uProxyService
             // For VOD channels, direct (non-transcoded) streams should always use the /stream/
             // endpoint. Xtream VOD source URLs may end in .m3u8 but createStream() proxies raw
             // bytes, not an HLS manifest. Live channels genuinely use HLS so their format is kept.
+            // Using the container extension (instead of a sentinel) also ensures the generated
+            // /stream/{id}.{ext} URL signals VOD to clients like SIPTV that classify by suffix.
             if (($actualChannel->is_vod ?? false) && ($format === 'hls' || $format === 'm3u8')) {
-                $format = 'raw';
+                $format = $actualChannel->container_extension ?? 'mp4';
             }
 
             // Return the direct proxy URL using the stream ID
@@ -1269,8 +1281,10 @@ class M3uProxyService
                         }
 
                         $format = $this->getFormatFromUrl($url);
+                        // Episode URLs may end in .m3u8 but the proxy serves raw bytes.
+                        // Use the container extension so /stream/{id}.{ext} signals VOD.
                         if ($format === 'hls' || $format === 'm3u8') {
-                            $format = 'raw';
+                            $format = $episode->container_extension ?? 'mp4';
                         }
 
                         return $this->buildProxyUrl($existingStreamId, $format, $username);
@@ -1415,10 +1429,11 @@ class M3uProxyService
             // For direct (non-transcoded) streams, always use the /stream/ endpoint.
             // The source URL may have an .m3u8 extension (common for Xtream episode URLs),
             // but createStream() proxies raw bytes — not an HLS manifest — so we must
-            // avoid buildProxyUrl routing to the /hls/ endpoint.
+            // avoid buildProxyUrl routing to the /hls/ endpoint. Using the real container
+            // extension also makes the resulting URL classify as VOD for clients like SIPTV.
             $format = $this->getFormatFromUrl($url);
             if ($format === 'hls' || $format === 'm3u8') {
-                $format = 'raw';
+                $format = $episode->container_extension ?? 'mp4';
             }
 
             // Return the direct proxy URL using the stream ID
@@ -2040,12 +2055,31 @@ class M3uProxyService
             // HLS format: /hls/{stream_id}/playlist.m3u8
             $url = $baseUrl.'/hls/'.$streamId.'/playlist.m3u8';
         } else {
-            // Direct stream format: /stream/{stream_id}
-            $url = $baseUrl.'/stream/'.$streamId;
+            // Direct stream format: /stream/{stream_id}.{ext}
+            // The extension is a client-side hint only — m3u-proxy strips any
+            // trailing known extension before looking up the stream. SIPTV (and
+            // similar clients) classify VOD vs live by URL suffix, so serving
+            // /stream/{id}.mp4 for a VOD channel preserves seek/rewind behavior.
+            $url = $baseUrl.'/stream/'.$streamId.'.'.$this->normalizeStreamExtension($format);
         }
 
         // Append trace parameters if provided
         return $this->appendProxyTraceParams($url, $username);
+    }
+
+    /**
+     * Normalize an arbitrary format token into a safe media file extension.
+     *
+     * Unknown or empty formats fall back to 'ts' so the generated URL is always
+     * a valid direct stream path. The allow-list mirrors the extensions the
+     * m3u-proxy strips server-side in resolve_stream_id.
+     */
+    protected function normalizeStreamExtension(string $format): string
+    {
+        $ext = strtolower(trim($format, ". \t\n\r\0\x0B"));
+        $allowed = ['ts', 'm2ts', 'mp4', 'mkv', 'webm', 'avi', 'mov', 'mp3', 'aac'];
+
+        return in_array($ext, $allowed, true) ? $ext : 'ts';
     }
 
     /**
