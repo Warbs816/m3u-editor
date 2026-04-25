@@ -1347,7 +1347,8 @@ class XtreamApiController extends Controller
                     ->get()
                     ->pluck('category')
                     ->filter()
-                    ->unique('id');
+                    ->unique('id')
+                    ->sortBy('sort_order');
 
                 foreach ($categories as $category) {
                     $seriesCategories[] = [
