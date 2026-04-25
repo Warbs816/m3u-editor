@@ -246,20 +246,17 @@ class SyncSeriesStrmFiles implements ShouldQueue
         // Get all unique sync locations for this user/playlist
         $syncLocations = StrmFileMapping::query()
             ->where('syncable_type', Episode::class)
-            ->when($this->playlist_id, function ($query, $playlistId) {
-                $query->whereHasMorph('syncable', [Episode::class], function ($q) use ($playlistId) {
-                    $q->where('playlist_id', $playlistId);
-                });
-            })
-            ->when($this->series?->id, function ($query, $seriesId) {
-                $query->whereHasMorph('syncable', [Episode::class], function ($q) use ($seriesId) {
-                    $q->where('series_id', $seriesId);
-                });
-            })
-            ->when($this->series_ids, function ($query, $seriesIds) {
-                $query->whereHasMorph('syncable', [Episode::class], function ($q) use ($seriesIds) {
-                    $q->whereIn('series_id', $seriesIds);
-                });
+            ->whereHasMorph('syncable', [Episode::class], function ($q) {
+                $q->where('user_id', $this->user_id);
+                if ($this->playlist_id) {
+                    $q->where('playlist_id', $this->playlist_id);
+                }
+                if ($this->series?->id) {
+                    $q->where('series_id', $this->series->id);
+                }
+                if ($this->series_ids !== null) {
+                    $q->whereIn('series_id', $this->series_ids);
+                }
             })
             ->distinct()
             ->pluck('sync_location')

@@ -508,22 +508,24 @@ class SyncVodStrmFiles implements ShouldQueue
 
         Log::info('STRM Sync: Starting global VOD cleanup');
 
+        $playlistId = $this->resolvePlaylistId();
+        $userId = $this->resolveUserId();
+
         $syncLocations = StrmFileMapping::query()
             ->where('syncable_type', Channel::class)
-            ->when($this->playlist_id, function ($query, $playlistId) {
-                $query->whereHasMorph('syncable', [Channel::class], function ($q) use ($playlistId) {
+            ->whereHasMorph('syncable', [Channel::class], function ($q) use ($userId, $playlistId) {
+                if ($userId) {
+                    $q->where('user_id', $userId);
+                }
+                if (! $this->all_playlists && $playlistId) {
                     $q->where('playlist_id', $playlistId);
-                });
-            })
-            ->when($this->channel?->id, function ($query, $channelId) {
-                $query->whereHasMorph('syncable', [Channel::class], function ($q) use ($channelId) {
-                    $q->where('id', $channelId);
-                });
-            })
-            ->when($this->channel_ids, function ($query, $channelIds) {
-                $query->whereHasMorph('syncable', [Channel::class], function ($q) use ($channelIds) {
-                    $q->whereIn('id', $channelIds);
-                });
+                }
+                if ($this->channel?->id) {
+                    $q->where('id', $this->channel->id);
+                }
+                if ($this->channel_ids !== null) {
+                    $q->whereIn('id', $this->channel_ids);
+                }
             })
             ->distinct()
             ->pluck('sync_location')
