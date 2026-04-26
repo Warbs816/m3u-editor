@@ -6,6 +6,7 @@ use App\Models\ChannelFailover;
 use App\Models\Playlist;
 use App\Models\User;
 use App\Services\PlaylistUrlService;
+use Illuminate\Queue\Middleware\WithoutOverlapping;
 
 beforeEach(function () {
     $this->user = User::factory()->create();
@@ -207,6 +208,23 @@ it('persists score breakdown on each failover row after rescoring', function () 
         ->toHaveKey('score')
         ->and($hdRow->metadata['priority_order'])->toBe(['resolution', 'fps', 'bitrate', 'codec'])
         ->and($hdRow->metadata['attribute_scores'])->toHaveKeys(['resolution', 'fps', 'bitrate', 'codec']);
+});
+
+it('registers a WithoutOverlapping middleware keyed on the playlist id', function () {
+    $job = new RescoreChannelFailovers(playlistId: 42);
+
+    $middleware = $job->middleware();
+
+    expect($middleware)->toHaveCount(1)
+        ->and($middleware[0])->toBeInstanceOf(WithoutOverlapping::class)
+        ->and($middleware[0]->key)->toBe('42');
+});
+
+it('uses different overlap keys for different playlists so they do not block each other', function () {
+    $jobA = new RescoreChannelFailovers(playlistId: 1);
+    $jobB = new RescoreChannelFailovers(playlistId: 2);
+
+    expect($jobA->middleware()[0]->key)->not->toBe($jobB->middleware()[0]->key);
 });
 
 it('honors the channelIds filter to scope rescoring to specific masters', function () {

@@ -12,6 +12,7 @@ use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
 use Illuminate\Queue\InteractsWithQueue;
+use Illuminate\Queue\Middleware\WithoutOverlapping;
 use Illuminate\Queue\SerializesModels;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Collection;
@@ -45,6 +46,24 @@ class RescoreChannelFailovers implements ShouldQueue
         public int $playlistId,
         public ?array $channelIds = null,
     ) {}
+
+    /**
+     * Prevent concurrent runs against the same playlist. If a job is already in
+     * flight, additional dispatches (manual + scheduled, or two manual clicks)
+     * are dropped — scoring is idempotent and re-probing the same upstream URLs
+     * twice would just waste provider quota. Lock auto-releases at the job
+     * timeout so a crashed worker doesn't hold it indefinitely.
+     *
+     * @return array<int, object>
+     */
+    public function middleware(): array
+    {
+        return [
+            (new WithoutOverlapping((string) $this->playlistId))
+                ->releaseAfter($this->timeout)
+                ->expireAfter($this->timeout),
+        ];
+    }
 
     public function handle(): void
     {
