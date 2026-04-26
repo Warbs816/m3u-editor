@@ -237,12 +237,9 @@ class ChannelResource extends Resource implements CopilotResource
                 ->sortable(),
             IconColumn::make('is_smart_channel')
                 ->label(__('Smart'))
-                ->icon('heroicon-o-sparkles')
+                ->icon(fn ($record): ?string => $record?->is_smart_channel ? 'heroicon-o-sparkles' : null)
                 ->color('info')
-                ->tooltip(fn ($record): ?string => $record->is_smart_channel ? __('Smart channel — streams the highest-ranked failover automatically') : null)
-                ->getStateUsing(fn ($record): bool => (bool) $record->is_smart_channel)
-                ->boolean()
-                ->falseIcon('')
+                ->tooltip(fn ($record): ?string => $record?->is_smart_channel ? __('Smart channel — streams the highest-ranked failover automatically') : null)
                 ->sortable()
                 ->toggleable(),
             TextInputColumn::make('stream_id_custom')

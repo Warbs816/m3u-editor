@@ -189,6 +189,12 @@ echo $totalBandwidth > 1000 ? round($totalBandwidth / 1000, 1) . ' Mbps' : $tota
                                 </div>
                                 
                                 <div class="flex items-center space-x-2">
+                                    @if($stream['model']['is_smart_channel'] ?? false)
+                                        <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-sky-100 dark:bg-sky-900 text-sky-800 dark:text-sky-200" title="Smart channel — streams the highest-ranked failover automatically">
+                                            <x-heroicon-s-sparkles class="w-3 h-3 mr-1" />
+                                            Smart Channel
+                                        </span>
+                                    @endif
                                     @if($stream['alias_name'] ?? false)
                                         <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-violet-100 dark:bg-violet-900 text-violet-800 dark:text-violet-200">
                                             Alias: {{ $stream['alias_name'] }}
