@@ -2116,27 +2116,29 @@ class PlaylistResource extends Resource implements CopilotResource
                                 }),
                         ]),
 
-                    Fieldset::make(__('Periodic Failover Rescoring (optional)'))
-                        ->columnSpanFull()
-                        ->columns(2)
-                        ->hidden(fn (Get $get): bool => ! $get('auto_merge_channels_enabled'))
-                        ->schema([
-                            Select::make('auto_rescore_failovers_interval')
-                                ->label(__('Re-score failovers'))
-                                ->options([
-                                    'daily' => __('Daily'),
-                                    'weekly' => __('Weekly'),
-                                ])
-                                ->placeholder(__('Off'))
-                                ->helperText(__('Periodically re-score this playlist\'s failover groups so the highest-quality source bubbles to the top. Master channels are never promoted or replaced; only failover sort order changes.')),
-                            TextInput::make('failover_rescore_staleness_days')
-                                ->label(__('Re-probe channels older than (days)'))
-                                ->numeric()
-                                ->default(7)
-                                ->minValue(0)
-                                ->maxValue(365)
-                                ->helperText(__('Channels whose stream stats are older than this will be re-probed during rescoring. Set to 0 to always re-probe.')),
-                        ]),
+                ]),
+            Section::make(__('Failover Rescoring'))
+                ->description(__('Keeps failover ordering in sync with current stream quality. Affects three places: scheduled rescoring (the interval below), the per-channel "Rescore now" action, and the "Make virtual primary" bulk action. The Priority Order under Auto-Merge above is reused for the actual scoring in all three.'))
+                ->columnSpanFull()
+                ->collapsible()
+                ->collapsed($creating)
+                ->columns(2)
+                ->schema([
+                    Select::make('auto_rescore_failovers_interval')
+                        ->label(__('Periodic rescoring'))
+                        ->options([
+                            'daily' => __('Daily'),
+                            'weekly' => __('Weekly'),
+                        ])
+                        ->placeholder(__('Off'))
+                        ->helperText(__('Schedule a recurring rescore for every failover group in this playlist. Master channels are never promoted or replaced — only failover sort order changes. Off = rescore manually only via the "Rescore now" button.')),
+                    TextInput::make('failover_rescore_staleness_days')
+                        ->label(__('Re-probe channels older than (days)'))
+                        ->numeric()
+                        ->default(7)
+                        ->minValue(0)
+                        ->maxValue(365)
+                        ->helperText(__('During scheduled or manual rescoring, channels with stats older than this are re-probed first. Set to 0 to always re-probe. The "Make virtual primary" action uses existing stats only and does not consult this setting.')),
                 ]),
             Section::make(__('Find & Replace Rules'))
                 ->description(__('Define find & replace rules that automatically run after each playlist sync. Rules execute in order.'))
