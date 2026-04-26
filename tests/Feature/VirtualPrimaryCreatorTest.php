@@ -158,3 +158,37 @@ it('uses the provided title when one is supplied', function () {
 it('throws when called with an empty channel collection', function () {
     VirtualPrimaryCreator::fromPlaylist($this->playlist)->create(collect());
 })->throws(InvalidArgumentException::class);
+
+it('persists score and per-attribute breakdown on each channel_failovers row', function () {
+    $hd = vpChannel($this->user, $this->playlist, ['title' => 'HD']);
+    $sd = vpChannel($this->user, $this->playlist, ['title' => 'SD'], stats: [
+        ['stream' => ['codec_type' => 'video', 'codec_name' => 'h264', 'width' => 720, 'height' => 480]],
+    ]);
+
+    $virtual = VirtualPrimaryCreator::fromPlaylist($this->playlist)->create(collect([$sd, $hd]));
+
+    $hdFailover = ChannelFailover::where('channel_id', $virtual->id)
+        ->where('channel_failover_id', $hd->id)
+        ->first();
+
+    expect($hdFailover->metadata)
+        ->toHaveKey('score')
+        ->and($hdFailover->metadata['priority_order'])->toBe(['resolution', 'fps', 'bitrate', 'codec'])
+        ->and($hdFailover->metadata['attribute_scores'])->toHaveKeys(['resolution', 'fps', 'bitrate', 'codec'])
+        ->and($hdFailover->metadata['attribute_scores']['resolution'])->toBe(25); // 1920x1080 / 82944 ≈ 25
+});
+
+it('rank() returns channels sorted by score with breakdowns', function () {
+    $hd = vpChannel($this->user, $this->playlist, ['title' => 'HD']);
+    $sd = vpChannel($this->user, $this->playlist, ['title' => 'SD'], stats: [
+        ['stream' => ['codec_type' => 'video', 'codec_name' => 'h264', 'width' => 720, 'height' => 480]],
+    ]);
+
+    $ranking = VirtualPrimaryCreator::fromPlaylist($this->playlist)->rank(collect([$sd, $hd]));
+
+    expect($ranking)->toHaveCount(2)
+        ->and($ranking[0]['channel']->id)->toBe($hd->id)
+        ->and($ranking[1]['channel']->id)->toBe($sd->id)
+        ->and($ranking[0]['score'])->toBeGreaterThan($ranking[1]['score'])
+        ->and($ranking[0]['breakdown'])->toHaveKeys(['resolution', 'fps', 'bitrate', 'codec']);
+});

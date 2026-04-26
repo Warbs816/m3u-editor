@@ -28,6 +28,9 @@ class VirtualPrimaryCreator
      * Score the supplied channels, create a virtual-primary custom channel from
      * the top scorer, and attach all sources as failovers in score order.
      *
+     * Score breakdowns are persisted to channel_failovers.metadata so the
+     * rationale stays inspectable later (e.g. via UI or DB query).
+     *
      * @param  Collection<int, Channel>  $channels
      */
     public function create(Collection $channels, ?string $title = null, bool $disableSources = false): Channel
@@ -36,13 +39,10 @@ class VirtualPrimaryCreator
             throw new \InvalidArgumentException('Cannot build a virtual primary from an empty selection.');
         }
 
-        $scored = $channels->map(fn (Channel $channel) => [
-            'channel' => $channel,
-            'score' => $this->scorer->score($channel),
-        ])->sortByDesc('score')->values();
+        $ranking = $this->rank($channels);
 
         /** @var Channel $top */
-        $top = $scored->first()['channel'];
+        $top = $ranking->first()['channel'];
 
         $resolvedTitle = $title !== null && $title !== ''
             ? $title
@@ -66,12 +66,19 @@ class VirtualPrimaryCreator
             'is_vod' => false,
         ]);
 
-        foreach ($scored as $index => $row) {
+        $rankedAt = now()->toIso8601String();
+        foreach ($ranking as $index => $row) {
             ChannelFailover::create([
                 'user_id' => $virtualPrimary->user_id,
                 'channel_id' => $virtualPrimary->id,
                 'channel_failover_id' => $row['channel']->id,
                 'sort' => $index,
+                'metadata' => [
+                    'score' => $row['score'],
+                    'attribute_scores' => $row['breakdown'],
+                    'priority_order' => array_keys($row['breakdown']),
+                    'ranked_at' => $rankedAt,
+                ],
             ]);
         }
 
@@ -80,6 +87,27 @@ class VirtualPrimaryCreator
         }
 
         return $virtualPrimary->fresh();
+    }
+
+    /**
+     * Score and rank the supplied channels, returning each with its score and
+     * per-attribute breakdown. Same logic as create() uses internally — exposed
+     * so callers (e.g. bulk-action modals) can preview the ranking before
+     * committing to creating the virtual primary.
+     *
+     * @param  Collection<int, Channel>  $channels
+     * @return Collection<int, array{channel: Channel, score: int, breakdown: array<string, int>}>
+     */
+    public function rank(Collection $channels): Collection
+    {
+        return $channels
+            ->map(fn (Channel $channel) => [
+                'channel' => $channel,
+                'score' => $this->scorer->score($channel),
+                'breakdown' => $this->scorer->scoreBreakdown($channel),
+            ])
+            ->sortByDesc('score')
+            ->values();
     }
 
     /**

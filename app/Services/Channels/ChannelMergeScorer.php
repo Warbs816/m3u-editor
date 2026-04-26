@@ -93,23 +93,47 @@ class ChannelMergeScorer
         $multiplier = count($this->priorityOrder) * 1000;
 
         foreach ($this->priorityOrder as $attribute) {
-            $attributeScore = match ($attribute) {
-                'playlist_priority' => $this->getPlaylistPriorityScore($channel),
-                'group_priority' => $this->getGroupPriorityScore($channel),
-                'catchup_support' => $this->getCatchupScore($channel),
-                'resolution' => $this->getResolutionScore($channel),
-                'fps' => $this->getFpsScore($channel),
-                'bitrate' => $this->getBitrateScore($channel),
-                'codec' => $this->getCodecScore($channel),
-                'keyword_match' => $this->getKeywordScore($channel),
-                default => 0,
-            };
-
-            $score += $attributeScore * $multiplier;
+            $score += $this->attributeScore($attribute, $channel) * $multiplier;
             $multiplier = max(1, $multiplier - 1000);
         }
 
         return $score;
+    }
+
+    /**
+     * Return per-attribute scores (0-100 each) for a channel under the configured priority order.
+     *
+     * Useful for explaining why a channel ranked the way it did. The priority
+     * order is preserved so the highest-impact attributes appear first.
+     *
+     * @return array<string, int>
+     */
+    public function scoreBreakdown(Channel $channel): array
+    {
+        $breakdown = [];
+        foreach ($this->priorityOrder as $attribute) {
+            $breakdown[$attribute] = $this->attributeScore($attribute, $channel);
+        }
+
+        return $breakdown;
+    }
+
+    /**
+     * Score a single attribute (0-100). Returns 0 for unknown attributes.
+     */
+    protected function attributeScore(string $attribute, Channel $channel): int
+    {
+        return match ($attribute) {
+            'playlist_priority' => $this->getPlaylistPriorityScore($channel),
+            'group_priority' => $this->getGroupPriorityScore($channel),
+            'catchup_support' => $this->getCatchupScore($channel),
+            'resolution' => $this->getResolutionScore($channel),
+            'fps' => $this->getFpsScore($channel),
+            'bitrate' => $this->getBitrateScore($channel),
+            'codec' => $this->getCodecScore($channel),
+            'keyword_match' => $this->getKeywordScore($channel),
+            default => 0,
+        };
     }
 
     protected function getPlaylistPriorityScore(Channel $channel): int

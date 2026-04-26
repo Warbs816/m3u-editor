@@ -36,6 +36,7 @@ use Filament\Actions\DeleteAction;
 use Filament\Actions\EditAction;
 use Filament\Actions\ViewAction;
 use Filament\Forms\Components\Hidden;
+use Filament\Forms\Components\Placeholder;
 use Filament\Forms\Components\Repeater;
 use Filament\Forms\Components\Select;
 use Filament\Forms\Components\TextInput;
@@ -1118,17 +1119,52 @@ class ChannelResource extends Resource implements CopilotResource
                     ->modalSubmitActionLabel(__('Add failovers now')),
                 BulkAction::make('make_virtual_primary')
                     ->label(__('Make virtual primary'))
-                    ->schema([
-                        TextInput::make('title')
-                            ->label(__('Virtual channel title'))
-                            ->helperText(__('Leave empty to copy the highest-scoring source\'s title.'))
-                            ->maxLength(255),
-                        Toggle::make('disable_sources')
-                            ->label(__('Disable source channels'))
-                            ->helperText(__('When enabled, the selected source channels will be disabled after being attached as failovers. They\'ll only be reachable via the new virtual primary.'))
-                            ->default(false)
-                            ->inline(false),
-                    ])
+                    ->schema(function (Collection $records) {
+                        $playlists = $records->pluck('playlist_id')->unique();
+                        $playlistForScoring = $playlists->count() === 1
+                            ? Playlist::find($playlists->first())
+                            : null;
+
+                        $creator = VirtualPrimaryCreator::fromPlaylist($playlistForScoring);
+                        $ranking = $creator->rank($records);
+
+                        $rows = $ranking->map(function ($row, int $index) {
+                            $channel = $row['channel'];
+                            $playlistName = $channel->getEffectivePlaylist()->name ?? 'Unknown';
+                            $displayTitle = e($channel->title_custom ?: $channel->title ?: $channel->name);
+                            $rankBadge = '<span class="font-mono text-xs text-gray-500 dark:text-gray-400">#'.($index + 1).'</span>';
+                            $titleCell = "<div class=\"font-medium\">{$displayTitle}</div><div class=\"text-xs text-gray-500 dark:text-gray-400\">".e($playlistName).'</div>';
+                            $totalScore = '<span class="font-mono text-sm">'.number_format($row['score']).'</span>';
+
+                            $breakdownParts = [];
+                            foreach ($row['breakdown'] as $attribute => $score) {
+                                $label = e(str_replace('_', ' ', $attribute));
+                                $breakdownParts[] = "<span class=\"inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-gray-100 dark:bg-gray-800 text-xs mr-1 mb-1\"><span class=\"text-gray-500 dark:text-gray-400\">{$label}</span><span class=\"font-mono\">{$score}</span></span>";
+                            }
+                            $breakdownCell = '<div class="flex flex-wrap">'.implode('', $breakdownParts).'</div>';
+
+                            return "<tr class=\"border-t border-gray-200 dark:border-gray-700\"><td class=\"py-2 pr-2 align-top\">{$rankBadge}</td><td class=\"py-2 pr-2 align-top\">{$titleCell}</td><td class=\"py-2 pr-2 align-top\">{$totalScore}</td><td class=\"py-2 align-top\">{$breakdownCell}</td></tr>";
+                        })->implode('');
+
+                        $headerRow = '<thead><tr class="text-left text-xs uppercase text-gray-500 dark:text-gray-400"><th class="py-1 pr-2">Rank</th><th class="py-1 pr-2">Channel</th><th class="py-1 pr-2">Score</th><th class="py-1">Breakdown (per attribute, 0-100)</th></tr></thead>';
+                        $tableHtml = "<table class=\"w-full text-sm\">{$headerRow}<tbody>{$rows}</tbody></table>";
+
+                        return [
+                            Placeholder::make('ranking_preview')
+                                ->label(__('Ranked sources'))
+                                ->content(new HtmlString($tableHtml))
+                                ->columnSpanFull(),
+                            TextInput::make('title')
+                                ->label(__('Virtual channel title'))
+                                ->helperText(__('Leave empty to copy the highest-scoring source\'s title.'))
+                                ->maxLength(255),
+                            Toggle::make('disable_sources')
+                                ->label(__('Disable source channels'))
+                                ->helperText(__('When enabled, the selected source channels will be disabled after being attached as failovers. They\'ll only be reachable via the new virtual primary.'))
+                                ->default(false)
+                                ->inline(false),
+                        ];
+                    })
                     ->action(function (Collection $records, array $data): void {
                         if ($records->isEmpty()) {
                             return;

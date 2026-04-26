@@ -161,6 +161,9 @@ class RescoreChannelFailovers implements ShouldQueue
      * Score every failover and update channel_failovers.sort so the best
      * failover sits at sort=0. The master is intentionally not scored or altered.
      *
+     * Each failover's score and per-attribute breakdown is persisted into
+     * channel_failovers.metadata so the rationale stays inspectable later.
+     *
      * @param  Collection<int, Channel>  $failovers
      */
     protected function reorderFailovers(Channel $master, $failovers, ChannelMergeScorer $scorer): void
@@ -168,13 +171,23 @@ class RescoreChannelFailovers implements ShouldQueue
         $scored = $failovers->map(fn (Channel $failover) => [
             'failover_id' => $failover->id,
             'score' => $scorer->score($failover),
+            'breakdown' => $scorer->scoreBreakdown($failover),
         ])->sortByDesc('score')->values();
 
+        $rankedAt = now()->toIso8601String();
         foreach ($scored as $index => $row) {
             ChannelFailover::query()
                 ->where('channel_id', $master->id)
                 ->where('channel_failover_id', $row['failover_id'])
-                ->update(['sort' => $index]);
+                ->update([
+                    'sort' => $index,
+                    'metadata' => [
+                        'score' => $row['score'],
+                        'attribute_scores' => $row['breakdown'],
+                        'priority_order' => array_keys($row['breakdown']),
+                        'ranked_at' => $rankedAt,
+                    ],
+                ]);
         }
     }
 }

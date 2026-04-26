@@ -178,6 +178,37 @@ it('skips rescoring when the master has no failovers attached', function () {
     expect(ChannelFailover::count())->toBe(0);
 });
 
+it('persists score breakdown on each failover row after rescoring', function () {
+    $master = rescoreChannel($this->user, $this->playlist, [
+        'name' => 'Virtual Primary',
+        'is_custom' => true,
+        'url' => null,
+    ]);
+
+    $hd = rescoreChannel($this->user, $this->playlist, ['name' => 'HD Source']);
+    $sd = rescoreChannel($this->user, $this->playlist, ['name' => 'SD Source'], stats: [
+        ['stream' => ['codec_type' => 'video', 'codec_name' => 'h264', 'width' => 720, 'height' => 480]],
+    ]);
+
+    ChannelFailover::create([
+        'user_id' => $this->user->id, 'channel_id' => $master->id, 'channel_failover_id' => $sd->id, 'sort' => 0,
+    ]);
+    ChannelFailover::create([
+        'user_id' => $this->user->id, 'channel_id' => $master->id, 'channel_failover_id' => $hd->id, 'sort' => 1,
+    ]);
+
+    (new RescoreChannelFailovers($this->playlist->id))->handle();
+
+    $hdRow = ChannelFailover::where('channel_id', $master->id)
+        ->where('channel_failover_id', $hd->id)
+        ->first();
+
+    expect($hdRow->metadata)
+        ->toHaveKey('score')
+        ->and($hdRow->metadata['priority_order'])->toBe(['resolution', 'fps', 'bitrate', 'codec'])
+        ->and($hdRow->metadata['attribute_scores'])->toHaveKeys(['resolution', 'fps', 'bitrate', 'codec']);
+});
+
 it('honors the channelIds filter to scope rescoring to specific masters', function () {
     $masterA = rescoreChannel($this->user, $this->playlist, ['name' => 'Master A']);
     $masterB = rescoreChannel($this->user, $this->playlist, ['name' => 'Master B']);
