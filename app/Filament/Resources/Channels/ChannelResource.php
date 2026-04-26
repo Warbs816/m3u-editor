@@ -235,6 +235,16 @@ class ChannelResource extends Resource implements CopilotResource
                 ->badge()
                 ->toggleable()
                 ->sortable(),
+            IconColumn::make('is_smart_channel')
+                ->label(__('Smart'))
+                ->icon('heroicon-o-sparkles')
+                ->color('info')
+                ->tooltip(fn ($record): ?string => $record->is_smart_channel ? __('Smart channel — streams the highest-ranked failover automatically') : null)
+                ->getStateUsing(fn ($record): bool => (bool) $record->is_smart_channel)
+                ->boolean()
+                ->falseIcon('')
+                ->sortable()
+                ->toggleable(),
             TextInputColumn::make('stream_id_custom')
                 ->label(__('ID'))
                 ->rules(['min:0', 'max:255'])
@@ -1355,7 +1365,7 @@ class ChannelResource extends Resource implements CopilotResource
                     ]),
                 Section::make(__('Technical Details'))
                     ->collapsible()
-                    ->visible(fn ($record) => $record && ! $record->is_vod && ! ($record->is_custom && empty($record->url)))
+                    ->visible(fn ($record) => $record && ! $record->is_vod && ! $record->isSmartChannel())
                     ->headerActions([
                         Action::make('probe')
                             ->label(fn ($record) => match (self::resolveTechnicalDetailsState($record)) {
@@ -1738,6 +1748,12 @@ class ChannelResource extends Resource implements CopilotResource
                     Toggle::make('probe_enabled')
                         ->default(true)
                         ->helperText(__('Allow probing this channel when running playlist channel probe jobs.')),
+                    Toggle::make('is_smart_channel')
+                        ->label(__('Smart channel'))
+                        ->default(false)
+                        ->live()
+                        ->helperText(__('Auto-streams the highest-ranked failover. URL field is locked while on. Custom channels only.'))
+                        ->visible(fn (Get $get) => (bool) $get('is_custom')),
                 ]),
             Fieldset::make(__('Playlist Type (choose one)'))
                 ->schema([
@@ -1873,12 +1889,19 @@ class ChannelResource extends Resource implements CopilotResource
                         ->columnSpan(1)
                         ->prefixIcon('heroicon-m-globe-alt')
                         ->hintIcon(
-                            icon: fn (Get $get) => $get('is_custom') ? null : 'heroicon-m-question-mark-circle',
-                            tooltip: fn (Get $get) => $get('is_custom') ? null : 'The original URL from the playlist provider. This is read-only and cannot be modified. This URL is automatically updated on Playlist sync.'
+                            icon: fn (Get $get) => $get('is_smart_channel')
+                                ? 'heroicon-m-sparkles'
+                                : ($get('is_custom') ? null : 'heroicon-m-question-mark-circle'),
+                            tooltip: fn (Get $get) => $get('is_smart_channel')
+                                ? 'This is a smart channel. The streamed URL is taken from the highest-ranked failover automatically — set the URL on a failover channel instead, or remove the smart-channel flag to manage the URL directly.'
+                                : ($get('is_custom') ? null : 'The original URL from the playlist provider. This is read-only and cannot be modified. This URL is automatically updated on Playlist sync.')
                         )
+                        ->helperText(fn (Get $get) => $get('is_smart_channel')
+                            ? __('Smart channels rely on auto-failover; setting a URL here would override that.')
+                            : null)
                         ->formatStateUsing(fn ($record) => $record?->url)
-                        ->disabled(fn (Get $get) => ! $get('is_custom')) // make it read-only but copyable for non-custom channels
-                        ->dehydrated(fn (Get $get) => $get('is_custom')) // don't save the value in the database for custom channels
+                        ->disabled(fn (Get $get) => $get('is_smart_channel') || ! $get('is_custom'))
+                        ->dehydrated(fn (Get $get) => ! $get('is_smart_channel') && $get('is_custom'))
                         ->type('url'),
                     TextInput::make('url_custom')
                         ->label(__('URL Override'))

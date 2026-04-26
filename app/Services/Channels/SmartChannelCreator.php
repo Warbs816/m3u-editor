@@ -48,12 +48,13 @@ class SmartChannelCreator
             ? $title
             : ($top->title_custom ?: $top->title ?: $top->name);
 
-        $virtualPrimary = Channel::create([
+        $smartChannel = Channel::create([
             'user_id' => $top->user_id,
             'playlist_id' => $top->playlist_id,
             'group_id' => $top->group_id,
             'group' => $top->group,
             'is_custom' => true,
+            'is_smart_channel' => true,
             'enabled' => true,
             'url' => null,
             'title' => $resolvedTitle,
@@ -69,8 +70,8 @@ class SmartChannelCreator
         $rankedAt = now()->toIso8601String();
         foreach ($ranking as $index => $row) {
             ChannelFailover::create([
-                'user_id' => $virtualPrimary->user_id,
-                'channel_id' => $virtualPrimary->id,
+                'user_id' => $smartChannel->user_id,
+                'channel_id' => $smartChannel->id,
                 'channel_failover_id' => $row['channel']->id,
                 'sort' => $index,
                 'metadata' => [
@@ -86,7 +87,7 @@ class SmartChannelCreator
             Channel::whereIn('id', $channels->pluck('id')->all())->update(['enabled' => false]);
         }
 
-        return $virtualPrimary->fresh();
+        return $smartChannel->fresh();
     }
 
     /**

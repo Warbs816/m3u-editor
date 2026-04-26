@@ -178,6 +178,34 @@ it('persists score and per-attribute breakdown on each channel_failovers row', f
         ->and($hdFailover->metadata['attribute_scores']['resolution'])->toBe(25); // 1920x1080 / 82944 ≈ 25
 });
 
+it('flags the created channel with is_smart_channel = true', function () {
+    $hd = vpChannel($this->user, $this->playlist, ['title' => 'HD']);
+    $sd = vpChannel($this->user, $this->playlist, ['title' => 'SD'], stats: [
+        ['stream' => ['codec_type' => 'video', 'codec_name' => 'h264', 'width' => 720, 'height' => 480]],
+    ]);
+
+    $smartChannel = SmartChannelCreator::fromPlaylist($this->playlist)->create(collect([$sd, $hd]));
+
+    expect($smartChannel->is_smart_channel)->toBeTrue()
+        ->and($smartChannel->isSmartChannel())->toBeTrue()
+        ->and($smartChannel->is_custom)->toBeTrue()
+        ->and($smartChannel->url)->toBeNull();
+});
+
+it('smartChannels query scope filters to flagged channels only', function () {
+    $hd = vpChannel($this->user, $this->playlist, ['title' => 'HD']);
+    $sd = vpChannel($this->user, $this->playlist, ['title' => 'SD']);
+
+    SmartChannelCreator::fromPlaylist($this->playlist)->create(collect([$hd, $sd]));
+
+    $smartChannels = Channel::smartChannels()->get();
+
+    expect($smartChannels)->toHaveCount(1)
+        ->and($smartChannels->first()->is_smart_channel)->toBeTrue()
+        ->and($smartChannels->first()->id)->not->toBe($hd->id)
+        ->and($smartChannels->first()->id)->not->toBe($sd->id);
+});
+
 it('rank() returns channels sorted by score with breakdowns', function () {
     $hd = vpChannel($this->user, $this->playlist, ['title' => 'HD']);
     $sd = vpChannel($this->user, $this->playlist, ['title' => 'SD'], stats: [

@@ -49,6 +49,7 @@ class Channel extends Model
         'extvlcopt' => 'array',
         'kodidrop' => 'array',
         'is_custom' => 'boolean',
+        'is_smart_channel' => 'boolean',
         'is_vod' => 'boolean',
         'enable_proxy' => 'boolean',
         'tmdb_id' => 'integer',
@@ -819,6 +820,29 @@ class Channel extends Model
     public function hasMovieId(): bool
     {
         return $this->getTmdbId() !== null || $this->getImdbId() !== null;
+    }
+
+    /**
+     * Convenience helper: same as reading $this->is_smart_channel, but cast-safe
+     * for code that wants a boolean expression in templates / closures.
+     */
+    public function isSmartChannel(): bool
+    {
+        return (bool) $this->is_smart_channel;
+    }
+
+    /**
+     * Filter to only channels that have been classified as smart channels.
+     *
+     * Smart channels are custom wrappers with no URL of their own; the
+     * effective stream URL comes from the highest-ranked attached failover
+     * via PlaylistUrlService::getChannelUrl(). The flag is set explicitly
+     * (e.g. by SmartChannelCreator) — composite "looks like one" configs
+     * don't auto-classify.
+     */
+    public function scopeSmartChannels(Builder $query): Builder
+    {
+        return $query->where('is_smart_channel', true);
     }
 
     public function scopeHasMovieId(Builder $query): Builder
