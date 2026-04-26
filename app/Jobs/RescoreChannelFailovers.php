@@ -73,13 +73,15 @@ class RescoreChannelFailovers implements ShouldQueue
 
         $scorer = $this->buildScorer($playlist);
 
-        foreach ($masterIds as $masterId) {
-            $master = Channel::find($masterId);
-            if (! $master) {
-                continue;
-            }
+        // Eager-load masters with their failover channels in one query so the
+        // per-iteration loop doesn't N+1.
+        $masters = Channel::query()
+            ->with('failoverChannels')
+            ->whereIn('id', $masterIds)
+            ->get();
 
-            $failovers = $master->failoverChannels()->get();
+        foreach ($masters as $master) {
+            $failovers = $master->failoverChannels;
             if ($failovers->isEmpty()) {
                 continue;
             }

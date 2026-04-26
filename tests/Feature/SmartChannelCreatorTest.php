@@ -159,6 +159,26 @@ it('throws when called with an empty channel collection', function () {
     SmartChannelCreator::fromPlaylist($this->playlist)->create(collect());
 })->throws(InvalidArgumentException::class);
 
+it('rejects sources spanning multiple playlists', function () {
+    $other = Playlist::factory()->for($this->user)->createQuietly();
+
+    $a = vpChannel($this->user, $this->playlist, ['title' => 'A']);
+    $b = vpChannel($this->user, $other, ['title' => 'B']);
+
+    SmartChannelCreator::fromPlaylist($this->playlist)->create(collect([$a, $b]));
+})->throws(InvalidArgumentException::class, 'same playlist');
+
+it('rejects existing smart channels as sources', function () {
+    $hd = vpChannel($this->user, $this->playlist, ['title' => 'HD']);
+    $sd = vpChannel($this->user, $this->playlist, ['title' => 'SD']);
+
+    $existingSmart = SmartChannelCreator::fromPlaylist($this->playlist)->create(collect([$hd, $sd]));
+
+    $thirdSource = vpChannel($this->user, $this->playlist, ['title' => 'Other']);
+
+    SmartChannelCreator::fromPlaylist($this->playlist)->create(collect([$existingSmart, $thirdSource]));
+})->throws(InvalidArgumentException::class, 'cannot be used as sources');
+
 it('persists score and per-attribute breakdown on each channel_failovers row', function () {
     $hd = vpChannel($this->user, $this->playlist, ['title' => 'HD']);
     $sd = vpChannel($this->user, $this->playlist, ['title' => 'SD'], stats: [

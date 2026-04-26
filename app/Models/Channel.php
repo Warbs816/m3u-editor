@@ -457,6 +457,11 @@ class Channel extends Model
      * `bit_rate` null (common for live MPEG-TS / HLS). Reads ~5 seconds of
      * video packets and computes (bytes * 8 / duration). Returns bps as an
      * integer, or null if no usable packets were captured.
+     *
+     * Caps its timeout at 10 seconds regardless of the metadata-pass timeout —
+     * `-read_intervals "%+5"` only reads 5 seconds of stream, so longer is
+     * pointless and would compound with the metadata-pass budget for jobs
+     * that probe many channels.
      */
     protected function sampleVideoBitrate(string $url, int $timeout): ?int
     {
@@ -470,7 +475,7 @@ class Channel extends Model
                 '-show_entries', 'packet=size,pts_time',
                 $url,
             ]);
-            $process->setTimeout($timeout);
+            $process->setTimeout(min($timeout, 10));
             $process->run();
 
             if ($process->getExitCode() !== 0) {

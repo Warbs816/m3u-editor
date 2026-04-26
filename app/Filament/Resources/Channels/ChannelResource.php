@@ -1106,11 +1106,22 @@ class ChannelResource extends Resource implements CopilotResource
                             return (int) $record->id !== (int) $masterRecordId;
                         });
 
+                        $smartChannelCount = $failoverRecords->filter(fn ($r) => (bool) $r->is_smart_channel)->count();
+                        $failoverRecords = $failoverRecords->filter(fn ($r) => ! $r->is_smart_channel);
+
                         foreach ($failoverRecords as $record) {
                             ChannelFailover::updateOrCreate([
                                 'channel_id' => $masterRecordId,
                                 'channel_failover_id' => $record->id,
                             ]);
+                        }
+
+                        if ($smartChannelCount > 0) {
+                            Notification::make()
+                                ->warning()
+                                ->title(__('Some channels were skipped'))
+                                ->body(__(':count smart channel(s) were skipped — smart channels can\'t be used as failovers themselves.', ['count' => $smartChannelCount]))
+                                ->send();
                         }
                     })->after(function () {
                         Notification::make()
@@ -1179,17 +1190,44 @@ class ChannelResource extends Resource implements CopilotResource
                         }
 
                         $playlists = $records->pluck('playlist_id')->unique();
-                        $playlistForScoring = $playlists->count() === 1
-                            ? Playlist::find($playlists->first())
-                            : null;
+                        if ($playlists->count() > 1) {
+                            Notification::make()
+                                ->warning()
+                                ->title(__('Mixed playlists not supported'))
+                                ->body(__('Smart channels must be created from sources within a single playlist. Narrow your selection and try again.'))
+                                ->send();
 
-                        SmartChannelCreator::fromPlaylist($playlistForScoring)->create(
-                            channels: $records,
-                            title: $data['title'] ?? null,
-                            disableSources: (bool) ($data['disable_sources'] ?? false),
-                        );
-                    })
-                    ->after(function () {
+                            return;
+                        }
+
+                        if ($records->contains(fn (Channel $channel) => (bool) $channel->is_smart_channel)) {
+                            Notification::make()
+                                ->warning()
+                                ->title(__('Smart channels cannot be sources'))
+                                ->body(__('Your selection includes one or more existing smart channels — pick raw provider channels instead, or remove the smart-channel flag first.'))
+                                ->send();
+
+                            return;
+                        }
+
+                        $playlistForScoring = Playlist::find($playlists->first());
+
+                        try {
+                            SmartChannelCreator::fromPlaylist($playlistForScoring)->create(
+                                channels: $records,
+                                title: $data['title'] ?? null,
+                                disableSources: (bool) ($data['disable_sources'] ?? false),
+                            );
+                        } catch (\InvalidArgumentException $e) {
+                            Notification::make()
+                                ->warning()
+                                ->title(__('Could not create smart channel'))
+                                ->body($e->getMessage())
+                                ->send();
+
+                            return;
+                        }
+
                         Notification::make()
                             ->success()
                             ->title(__('Smart channel created'))
@@ -2111,6 +2149,7 @@ class ChannelResource extends Resource implements CopilotResource
                                         ->withoutEagerLoads()
                                         ->with('playlist')
                                         ->whereNotIn('id', $existingFailoverIds)
+                                        ->where('is_smart_channel', false)
                                         ->where(function ($query) use ($searchLower) {
                                             $query->whereRaw('LOWER(title) LIKE ?', ["%{$searchLower}%"])
                                                 ->orWhereRaw('LOWER(title_custom) LIKE ?', ["%{$searchLower}%"])

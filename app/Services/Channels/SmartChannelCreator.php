@@ -39,6 +39,14 @@ class SmartChannelCreator
             throw new \InvalidArgumentException('Cannot build a smart channel from an empty selection.');
         }
 
+        if ($channels->contains(fn (Channel $channel) => (bool) $channel->is_smart_channel)) {
+            throw new \InvalidArgumentException('Smart channels cannot be used as sources for another smart channel — pick raw provider channels instead.');
+        }
+
+        if ($channels->pluck('playlist_id')->unique()->count() > 1) {
+            throw new \InvalidArgumentException('All sources for a smart channel must belong to the same playlist.');
+        }
+
         $ranking = $this->rank($channels);
 
         /** @var Channel $top */
