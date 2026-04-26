@@ -1896,9 +1896,6 @@ class ChannelResource extends Resource implements CopilotResource
                                 ? 'This is a smart channel. The streamed URL is taken from the highest-ranked failover automatically — set the URL on a failover channel instead, or remove the smart-channel flag to manage the URL directly.'
                                 : ($get('is_custom') ? null : 'The original URL from the playlist provider. This is read-only and cannot be modified. This URL is automatically updated on Playlist sync.')
                         )
-                        ->helperText(fn (Get $get) => $get('is_smart_channel')
-                            ? __('Smart channels rely on auto-failover; setting a URL here would override that.')
-                            : null)
                         ->formatStateUsing(fn ($record) => $record?->url)
                         ->disabled(fn (Get $get) => $get('is_smart_channel') || ! $get('is_custom'))
                         ->dehydrated(fn (Get $get) => ! $get('is_smart_channel') && $get('is_custom'))
