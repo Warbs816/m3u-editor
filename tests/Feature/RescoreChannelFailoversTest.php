@@ -83,7 +83,7 @@ it('reorders failovers so the highest-scoring channel sits at sort=0', function 
     ]);
 });
 
-it('flips the effective virtual-primary URL when the top failover changes', function () {
+it('flips the effective smart-channel URL when the top failover changes', function () {
     $master = rescoreChannel($this->user, $this->playlist, [
         'name' => 'Virtual Primary',
         'is_custom' => true,

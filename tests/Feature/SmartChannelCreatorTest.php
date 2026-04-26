@@ -6,7 +6,7 @@ use App\Models\ChannelFailover;
 use App\Models\EpgChannel;
 use App\Models\Playlist;
 use App\Models\User;
-use App\Services\Channels\VirtualPrimaryCreator;
+use App\Services\Channels\SmartChannelCreator;
 use App\Services\PlaylistUrlService;
 use Filament\Actions\BulkAction;
 use Filament\Schemas\Components\Component;
@@ -38,7 +38,7 @@ function vpChannel(User $user, Playlist $playlist, array $overrides, ?array $sta
     ], $overrides));
 }
 
-it('registers make_virtual_primary in the channel BulkModalActionGroup', function () {
+it('registers make_smart_channel in the channel BulkModalActionGroup', function () {
     $bulkActions = ChannelResource::getTableBulkActions();
     $group = $bulkActions[0];
 
@@ -57,7 +57,7 @@ it('registers make_virtual_primary in the channel BulkModalActionGroup', functio
         }
     }
 
-    expect($names)->toContain('make_virtual_primary');
+    expect($names)->toContain('make_smart_channel');
 });
 
 it('creates a custom channel with copied identity from the highest-scoring source', function () {
@@ -77,7 +77,7 @@ it('creates a custom channel with copied identity from the highest-scoring sourc
         ['stream' => ['codec_type' => 'video', 'codec_name' => 'h264', 'width' => 720, 'height' => 480]],
     ]);
 
-    $virtual = VirtualPrimaryCreator::fromPlaylist($this->playlist)->create(collect([$low, $high]));
+    $virtual = SmartChannelCreator::fromPlaylist($this->playlist)->create(collect([$low, $high]));
 
     expect($virtual->is_custom)->toBeTrue()
         ->and($virtual->url)->toBeNull()
@@ -95,7 +95,7 @@ it('attaches all selected channels as failovers in score order', function () {
         ['stream' => ['codec_type' => 'video', 'codec_name' => 'hevc', 'width' => 3840, 'height' => 2160]],
     ]);
 
-    $virtual = VirtualPrimaryCreator::fromPlaylist($this->playlist)->create(collect([$sd, $hd, $uhd]));
+    $virtual = SmartChannelCreator::fromPlaylist($this->playlist)->create(collect([$sd, $hd, $uhd]));
 
     $sorted = ChannelFailover::where('channel_id', $virtual->id)->orderBy('sort')->get();
 
@@ -111,7 +111,7 @@ it('streams the highest-ranked source URL via PlaylistUrlService fallback', func
         ['stream' => ['codec_type' => 'video', 'codec_name' => 'h264', 'width' => 720, 'height' => 480]],
     ]);
 
-    $virtual = VirtualPrimaryCreator::fromPlaylist($this->playlist)->create(collect([$sd, $hd]));
+    $virtual = SmartChannelCreator::fromPlaylist($this->playlist)->create(collect([$sd, $hd]));
 
     expect((new PlaylistUrlService)->getChannelUrl($virtual->fresh(), 'http://m3u.test'))->toContain('hd.example');
 });
@@ -122,7 +122,7 @@ it('disables source channels when the disableSources flag is set', function () {
         ['stream' => ['codec_type' => 'video', 'codec_name' => 'h264', 'width' => 720, 'height' => 480]],
     ]);
 
-    VirtualPrimaryCreator::fromPlaylist($this->playlist)->create(
+    SmartChannelCreator::fromPlaylist($this->playlist)->create(
         channels: collect([$hd, $sd]),
         disableSources: true,
     );
@@ -137,7 +137,7 @@ it('leaves source channels enabled when disableSources is false', function () {
         ['stream' => ['codec_type' => 'video', 'codec_name' => 'h264', 'width' => 720, 'height' => 480]],
     ]);
 
-    VirtualPrimaryCreator::fromPlaylist($this->playlist)->create(collect([$hd, $sd]));
+    SmartChannelCreator::fromPlaylist($this->playlist)->create(collect([$hd, $sd]));
 
     expect($hd->fresh()->enabled)->toBeTrue()
         ->and($sd->fresh()->enabled)->toBeTrue();
@@ -146,7 +146,7 @@ it('leaves source channels enabled when disableSources is false', function () {
 it('uses the provided title when one is supplied', function () {
     $hd = vpChannel($this->user, $this->playlist, ['title' => 'BBC One HD']);
 
-    $virtual = VirtualPrimaryCreator::fromPlaylist($this->playlist)->create(
+    $virtual = SmartChannelCreator::fromPlaylist($this->playlist)->create(
         channels: collect([$hd]),
         title: 'BBC One',
     );
@@ -156,7 +156,7 @@ it('uses the provided title when one is supplied', function () {
 });
 
 it('throws when called with an empty channel collection', function () {
-    VirtualPrimaryCreator::fromPlaylist($this->playlist)->create(collect());
+    SmartChannelCreator::fromPlaylist($this->playlist)->create(collect());
 })->throws(InvalidArgumentException::class);
 
 it('persists score and per-attribute breakdown on each channel_failovers row', function () {
@@ -165,7 +165,7 @@ it('persists score and per-attribute breakdown on each channel_failovers row', f
         ['stream' => ['codec_type' => 'video', 'codec_name' => 'h264', 'width' => 720, 'height' => 480]],
     ]);
 
-    $virtual = VirtualPrimaryCreator::fromPlaylist($this->playlist)->create(collect([$sd, $hd]));
+    $virtual = SmartChannelCreator::fromPlaylist($this->playlist)->create(collect([$sd, $hd]));
 
     $hdFailover = ChannelFailover::where('channel_id', $virtual->id)
         ->where('channel_failover_id', $hd->id)
@@ -184,7 +184,7 @@ it('rank() returns channels sorted by score with breakdowns', function () {
         ['stream' => ['codec_type' => 'video', 'codec_name' => 'h264', 'width' => 720, 'height' => 480]],
     ]);
 
-    $ranking = VirtualPrimaryCreator::fromPlaylist($this->playlist)->rank(collect([$sd, $hd]));
+    $ranking = SmartChannelCreator::fromPlaylist($this->playlist)->rank(collect([$sd, $hd]));
 
     expect($ranking)->toHaveCount(2)
         ->and($ranking[0]['channel']->id)->toBe($hd->id)

@@ -22,7 +22,7 @@ use App\Models\CustomPlaylist;
 use App\Models\Group;
 use App\Models\Playlist;
 use App\Models\StreamProfile;
-use App\Services\Channels\VirtualPrimaryCreator;
+use App\Services\Channels\SmartChannelCreator;
 use App\Services\DateFormatService;
 use App\Services\EpgCacheService;
 use App\Services\LogoCacheService;
@@ -1118,15 +1118,15 @@ class ChannelResource extends Resource implements CopilotResource
                     ->modalIcon('heroicon-o-arrow-path-rounded-square')
                     ->modalDescription(__('Add the selected channel(s) to the chosen channel as failover sources.'))
                     ->modalSubmitActionLabel(__('Add failovers now')),
-                BulkAction::make('make_virtual_primary')
-                    ->label(__('Make virtual primary'))
+                BulkAction::make('make_smart_channel')
+                    ->label(__('Make smart channel'))
                     ->schema(function (Collection $records) {
                         $playlists = $records->pluck('playlist_id')->unique();
                         $playlistForScoring = $playlists->count() === 1
                             ? Playlist::find($playlists->first())
                             : null;
 
-                        $creator = VirtualPrimaryCreator::fromPlaylist($playlistForScoring);
+                        $creator = SmartChannelCreator::fromPlaylist($playlistForScoring);
                         $ranking = $creator->rank($records);
 
                         $rows = $ranking->map(function ($row, int $index) {
@@ -1161,7 +1161,7 @@ class ChannelResource extends Resource implements CopilotResource
                                 ->maxLength(255),
                             Toggle::make('disable_sources')
                                 ->label(__('Disable source channels'))
-                                ->helperText(__('When enabled, the selected source channels will be disabled after being attached as failovers. They\'ll only be reachable via the new virtual primary.'))
+                                ->helperText(__('When enabled, the selected source channels will be disabled after being attached as failovers. They\'ll only be reachable via the new smart channel.'))
                                 ->default(false)
                                 ->inline(false),
                         ];
@@ -1176,7 +1176,7 @@ class ChannelResource extends Resource implements CopilotResource
                             ? Playlist::find($playlists->first())
                             : null;
 
-                        VirtualPrimaryCreator::fromPlaylist($playlistForScoring)->create(
+                        SmartChannelCreator::fromPlaylist($playlistForScoring)->create(
                             channels: $records,
                             title: $data['title'] ?? null,
                             disableSources: (bool) ($data['disable_sources'] ?? false),
@@ -1185,7 +1185,7 @@ class ChannelResource extends Resource implements CopilotResource
                     ->after(function () {
                         Notification::make()
                             ->success()
-                            ->title(__('Virtual primary created'))
+                            ->title(__('Smart channel created'))
                             ->body(__('A custom channel was created with the selected sources attached as failovers, ranked by quality.'))
                             ->send();
                     })
@@ -1193,8 +1193,8 @@ class ChannelResource extends Resource implements CopilotResource
                     ->requiresConfirmation()
                     ->icon('heroicon-o-arrow-trending-up')
                     ->modalIcon('heroicon-o-arrow-trending-up')
-                    ->modalDescription(__('Create a custom "virtual primary" channel from the selected channels. The highest-scoring source\'s title, logo, and EPG mapping will be copied. All selected channels become failovers, sorted by score, and the playlist will stream the top failover automatically.'))
-                    ->modalSubmitActionLabel(__('Create virtual primary')),
+                    ->modalDescription(__('Create a custom "smart channel" from the selected channels. The highest-scoring source\'s title, logo, and EPG mapping will be copied. All selected channels become failovers, sorted by score, and the playlist will stream the top failover automatically.'))
+                    ->modalSubmitActionLabel(__('Create smart channel')),
             ]),
 
             // -- Probing --

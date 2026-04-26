@@ -2118,7 +2118,7 @@ class PlaylistResource extends Resource implements CopilotResource
 
                 ]),
             Section::make(__('Failover Rescoring'))
-                ->description(__('Keeps failover ordering in sync with current stream quality. Affects three places: scheduled rescoring (the interval below), the per-channel "Rescore now" action, and the "Make virtual primary" bulk action. The Priority Order under Auto-Merge above is reused for the actual scoring in all three.'))
+                ->description(__('Keeps failover ordering in sync with current stream quality. Affects three places: scheduled rescoring (the interval below), the per-channel "Rescore now" action, and the "Make smart channel" bulk action. The Priority Order under Auto-Merge above is reused for the actual scoring in all three.'))
                 ->columnSpanFull()
                 ->collapsible()
                 ->collapsed($creating)
@@ -2138,7 +2138,7 @@ class PlaylistResource extends Resource implements CopilotResource
                         ->default(7)
                         ->minValue(0)
                         ->maxValue(365)
-                        ->helperText(__('During scheduled or manual rescoring, channels with stats older than this are re-probed first. Set to 0 to always re-probe. The "Make virtual primary" action uses existing stats only and does not consult this setting.')),
+                        ->helperText(__('During scheduled or manual rescoring, channels with stats older than this are re-probed first. Set to 0 to always re-probe. The "Make smart channel" action uses existing stats only and does not consult this setting.')),
                 ]),
             Section::make(__('Find & Replace Rules'))
                 ->description(__('Define find & replace rules that automatically run after each playlist sync. Rules execute in order.'))

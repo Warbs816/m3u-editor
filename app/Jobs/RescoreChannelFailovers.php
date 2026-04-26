@@ -23,7 +23,7 @@ use Throwable;
  * so the highest-scoring source sits at sort=0.
  *
  * The master channel is intentionally never promoted or replaced. For
- * "virtual-primary" masters (custom channel with no URL), the existing
+ * "smart channel" masters (custom channel with no URL), the existing
  * PlaylistUrlService::getChannelUrl() falls back to the first failover, so
  * re-ordering the failovers is enough to switch the effective stream URL.
  * For real-channel masters, this job simply re-orders failovers — the master

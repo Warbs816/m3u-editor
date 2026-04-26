@@ -8,7 +8,7 @@ use App\Models\Playlist;
 use Illuminate\Support\Collection;
 
 /**
- * Builds a "virtual primary" channel from a selection of source channels.
+ * Builds a "smart channel" from a selection of source channels.
  *
  * The custom channel has no URL of its own. The source channels are attached
  * as failovers, ranked by ChannelMergeScorer score. PlaylistUrlService falls
@@ -16,17 +16,17 @@ use Illuminate\Support\Collection;
  * effective stream URL always tracks the highest-scoring source.
  *
  * Identity (title, logo, EPG mapping, group) is copied from the highest-scoring
- * source, which is also where the virtual primary is parented.
+ * source, which is also where the smart channel is parented.
  */
-class VirtualPrimaryCreator
+class SmartChannelCreator
 {
     public function __construct(
         protected ChannelMergeScorer $scorer,
     ) {}
 
     /**
-     * Score the supplied channels, create a virtual-primary custom channel from
-     * the top scorer, and attach all sources as failovers in score order.
+     * Score the supplied channels, create a custom smart channel from the top
+     * scorer, and attach all sources as failovers in score order.
      *
      * Score breakdowns are persisted to channel_failovers.metadata so the
      * rationale stays inspectable later (e.g. via UI or DB query).
@@ -36,7 +36,7 @@ class VirtualPrimaryCreator
     public function create(Collection $channels, ?string $title = null, bool $disableSources = false): Channel
     {
         if ($channels->isEmpty()) {
-            throw new \InvalidArgumentException('Cannot build a virtual primary from an empty selection.');
+            throw new \InvalidArgumentException('Cannot build a smart channel from an empty selection.');
         }
 
         $ranking = $this->rank($channels);
@@ -93,7 +93,7 @@ class VirtualPrimaryCreator
      * Score and rank the supplied channels, returning each with its score and
      * per-attribute breakdown. Same logic as create() uses internally — exposed
      * so callers (e.g. bulk-action modals) can preview the ranking before
-     * committing to creating the virtual primary.
+     * committing to creating the smart channel.
      *
      * @param  Collection<int, Channel>  $channels
      * @return Collection<int, array{channel: Channel, score: int, breakdown: array<string, int>}>
