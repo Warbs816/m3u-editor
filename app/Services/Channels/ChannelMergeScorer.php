@@ -86,18 +86,35 @@ class ChannelMergeScorer
 
     /**
      * Calculate the weighted score for a channel under the configured priority order.
+     *
+     * Each attribute scores 0-100 (see scoreBreakdown). Weights are positional:
+     * with N priorities the first attribute is weighted ×N, the second ×(N-1),
+     * down to ×1. The total is normalized so the final score is always 0-100,
+     * regardless of how many priority attributes are configured.
+     *
+     *   score = round( 100 × Σ(rawᵢ × weightᵢ) / (100 × Σ weightᵢ) )
+     *         = round( Σ(rawᵢ × weightᵢ) / Σ weightᵢ )
+     *
+     * Relative ordering is identical to the unnormalized weighted sum, so this
+     * is a pure UX simplification — no behavioral change for ranking.
      */
     public function score(Channel $channel): int
     {
-        $score = 0;
-        $multiplier = count($this->priorityOrder) * 1000;
-
-        foreach ($this->priorityOrder as $attribute) {
-            $score += $this->attributeScore($attribute, $channel) * $multiplier;
-            $multiplier = max(1, $multiplier - 1000);
+        $count = count($this->priorityOrder);
+        if ($count === 0) {
+            return 0;
         }
 
-        return $score;
+        $sumOfWeights = $count * ($count + 1) / 2;
+        $weighted = 0;
+        $weight = $count;
+
+        foreach ($this->priorityOrder as $attribute) {
+            $weighted += $this->attributeScore($attribute, $channel) * $weight;
+            $weight--;
+        }
+
+        return (int) round($weighted / $sumOfWeights);
     }
 
     /**
