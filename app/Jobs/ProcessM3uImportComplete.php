@@ -372,6 +372,7 @@ class ProcessM3uImportComplete implements ShouldQueue
                 playlist: $playlist,
                 isNew: $this->isNew,
                 batchNo: $this->batchNo,
+                fireSyncCompleted: ! $this->runningSeriesImport,
             ));
             Notification::make()
                 ->info()
@@ -381,8 +382,9 @@ class ProcessM3uImportComplete implements ShouldQueue
                 ->sendToDatabase($playlist->user);
         }
 
-        if ($this->runningSeriesImport) {
-            return; // Exit early if series import is enabled, sync complete event will be fired after series import completes
+        // If processing Series or VOD, don't fire the playlist synced event yet as there are still more changes to be made to the channels (e.g. new channels added, channels updated with metadata, etc.) and we want to wait until all that is done before firing the event and allowing any downstream processes (e.g. auto-merge) to run. The playlist synced event will be fired in the respective jobs when they complete.
+        if ($syncVod || $this->runningSeriesImport) {
+            return; // The playlist synced event will be fired in the respective jobs when they complete
         }
 
         // Fire the playlist synced event with new channel IDs for auto-merge
