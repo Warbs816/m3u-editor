@@ -15,8 +15,10 @@ use App\Services\PlaylistUrlService;
 use Carbon\Carbon;
 use Exception;
 use Filament\Actions\Action;
+use Filament\Actions\Contracts\HasActions;
 use Filament\Notifications\Notification;
 use Filament\Pages\Page;
+use Filament\Schemas\Contracts\HasSchemas;
 use Filament\Support\Enums\Size;
 use Illuminate\Support\Facades\Log;
 
@@ -25,7 +27,7 @@ use Illuminate\Support\Facades\Log;
  *
  * Uses the external m3u-proxy server API to populate and manage streams.
  */
-class M3uProxyStreamMonitor extends Page
+class M3uProxyStreamMonitor extends Page implements HasActions, HasSchemas
 {
     public static function getNavigationLabel(): string
     {
@@ -126,86 +128,107 @@ class M3uProxyStreamMonitor extends Page
         ];
     }
 
-    public function triggerFailover(string $streamId): void
+    public function triggerFailoverAction(): Action
     {
-        if (! $this->authorizeStreamAction($streamId)) {
-            return;
-        }
+        return Action::make('triggerFailover')
+            ->label(__('Trigger Failover'))
+            ->color('warning')
+            ->icon('heroicon-o-exclamation-triangle')
+            ->requiresConfirmation()
+            ->modalHeading(__('Trigger Failover'))
+            ->modalDescription(__('Are you sure you want to trigger a failover for this stream?'))
+            ->action(function (array $arguments): void {
+                $streamId = $arguments['streamId'] ?? null;
 
-        try {
-            $success = $this->apiService->triggerFailover($streamId);
-            if ($success) {
-                Notification::make()
-                    ->title("Failover triggered for stream {$streamId}.")
-                    ->success()
-                    ->send();
-            } else {
-                Notification::make()
-                    ->title("Failed to trigger failover for stream {$streamId}.")
-                    ->danger()
-                    ->send();
-            }
-        } catch (Exception $e) {
-            Notification::make()
-                ->title(__('Error triggering failover.'))
-                ->body($e->getMessage())
-                ->danger()
-                ->send();
-        }
+                if (! $streamId || ! $this->authorizeStreamAction($streamId)) {
+                    return;
+                }
 
-        $this->refreshData();
-    }
-
-    public function stopStream(string $streamId): void
-    {
-        if (! $this->authorizeStreamAction($streamId)) {
-            return;
-        }
-
-        try {
-            // Support stopping broadcasts via a special stream ID prefix
-            if (str_starts_with($streamId, 'broadcast:')) {
-                $networkId = substr($streamId, 10);
-                $success = $this->apiService->stopBroadcast($networkId);
-
-                if ($success) {
+                try {
+                    $success = $this->apiService->triggerFailover($streamId);
+                    if ($success) {
+                        Notification::make()
+                            ->title("Failover triggered for stream {$streamId}.")
+                            ->success()
+                            ->send();
+                    } else {
+                        Notification::make()
+                            ->title("Failed to trigger failover for stream {$streamId}.")
+                            ->danger()
+                            ->send();
+                    }
+                } catch (Exception $e) {
                     Notification::make()
-                        ->title("Broadcast for network {$networkId} stopped successfully.")
-                        ->success()
-                        ->send();
-                } else {
-                    Notification::make()
-                        ->title("Failed to stop broadcast for network {$networkId}.")
+                        ->title(__('Error triggering failover.'))
+                        ->body($e->getMessage())
                         ->danger()
                         ->send();
                 }
 
                 $this->refreshData();
+            });
+    }
 
-                return;
-            }
+    public function stopStreamAction(): Action
+    {
+        return Action::make('stopStream')
+            ->label(__('Remove Stream'))
+            ->color('danger')
+            ->icon('heroicon-o-trash')
+            ->requiresConfirmation()
+            ->modalHeading(__('Remove Stream'))
+            ->modalDescription(__('Are you sure you want to remove this stream? This will disconnect all active clients.'))
+            ->action(function (array $arguments): void {
+                $streamId = $arguments['streamId'] ?? null;
 
-            $success = $this->apiService->stopStream($streamId);
-            if ($success) {
-                Notification::make()
-                    ->title("Stream {$streamId} stopped successfully.")
-                    ->success()
-                    ->send();
-            } else {
-                Notification::make()
-                    ->title("Failed to stop stream {$streamId}.")
-                    ->danger()
-                    ->send();
-            }
-        } catch (Exception $e) {
-            Notification::make()
-                ->title(__('Error stopping stream.'))
-                ->body($e->getMessage())
-                ->danger()
-                ->send();
-        }
+                if (! $streamId || ! $this->authorizeStreamAction($streamId)) {
+                    return;
+                }
 
-        $this->refreshData();
+                try {
+                    if (str_starts_with($streamId, 'broadcast:')) {
+                        $networkId = substr($streamId, 10);
+                        $success = $this->apiService->stopBroadcast($networkId);
+
+                        if ($success) {
+                            Notification::make()
+                                ->title("Broadcast for network {$networkId} stopped successfully.")
+                                ->success()
+                                ->send();
+                        } else {
+                            Notification::make()
+                                ->title("Failed to stop broadcast for network {$networkId}.")
+                                ->danger()
+                                ->send();
+                        }
+
+                        $this->refreshData();
+
+                        return;
+                    }
+
+                    $success = $this->apiService->stopStream($streamId);
+                    if ($success) {
+                        Notification::make()
+                            ->title("Stream {$streamId} stopped successfully.")
+                            ->success()
+                            ->send();
+                    } else {
+                        Notification::make()
+                            ->title("Failed to stop stream {$streamId}.")
+                            ->danger()
+                            ->send();
+                    }
+                } catch (Exception $e) {
+                    Notification::make()
+                        ->title(__('Error stopping stream.'))
+                        ->body($e->getMessage())
+                        ->danger()
+                        ->send();
+                }
+
+                $this->refreshData();
+            });
     }
 
     /**

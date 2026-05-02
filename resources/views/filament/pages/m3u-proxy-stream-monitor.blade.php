@@ -364,15 +364,13 @@
                                     @unless ($stream['broadcast'] ?? false)
                                         <x-filament::button color="warning" size="sm"
                                             icon="heroicon-o-exclamation-triangle"
-                                            wire:click="triggerFailover('{{ $stream['stream_id'] }}')"
-                                            wire:confirm="Are you sure you want to trigger a failover for this stream?"
+                                            @click="$wire.mountAction('triggerFailover', { streamId: '{{ $stream['stream_id'] }}' })"
                                             wire:loading.attr="disabled">
                                             Trigger Failover
                                         </x-filament::button>
                                     @endunless
                                     <x-filament::button color="danger" size="sm" icon="heroicon-o-trash"
-                                        wire:click="stopStream('{{ $stream['stream_id'] }}')"
-                                        wire:confirm="Are you sure you want to remove this stream? This will disconnect all active clients."
+                                        @click="$wire.mountAction('stopStream', { streamId: '{{ $stream['stream_id'] }}' })"
                                         wire:loading.attr="disabled">
                                         Remove Stream
                                     </x-filament::button>
