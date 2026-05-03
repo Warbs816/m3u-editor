@@ -358,6 +358,58 @@
                                 </div>
                             @endif
 
+                            @php $outputMediaInfo = $stream['model']['output_media_info'] ?? null; @endphp
+                            @if ($outputMediaInfo)
+                                <!-- Output Info Row (encoder/muxer side, transcoded streams only) -->
+                                <div
+                                    class="flex flex-wrap gap-2 mb-4 p-3 bg-amber-50 dark:bg-amber-900/10 rounded-lg border border-amber-200 dark:border-amber-900/40">
+                                    <div
+                                        class="flex items-center gap-1 text-xs text-amber-700 dark:text-amber-400 mr-1">
+                                        <x-heroicon-s-arrow-up-tray class="w-3.5 h-3.5" />
+                                        <span class="font-medium uppercase tracking-wide">Output</span>
+                                        <span
+                                            class="ml-1 inline-block h-1.5 w-1.5 rounded-full bg-green-500 animate-pulse"
+                                            title="Live data from active ffmpeg encoder"></span>
+                                    </div>
+                                    @if ($outputMediaInfo['resolution'] ?? false)
+                                        <x-filament::badge color="warning" size="sm" icon="heroicon-s-squares-2x2">
+                                            {{ $outputMediaInfo['resolution'] }}
+                                        </x-filament::badge>
+                                    @endif
+                                    @if ($outputMediaInfo['video_codec'] ?? false)
+                                        <x-filament::badge color="warning" size="sm" icon="heroicon-s-cpu-chip">
+                                            {{ strtoupper($outputMediaInfo['video_codec']) }}
+                                        </x-filament::badge>
+                                    @endif
+                                    @if ($outputMediaInfo['fps'] ?? false)
+                                        <x-filament::badge color="gray" size="sm">
+                                            {{ $outputMediaInfo['fps'] }} fps
+                                        </x-filament::badge>
+                                    @endif
+                                    @if ($outputMediaInfo['bitrate_kbps'] ?? false)
+                                        <x-filament::badge color="gray" size="sm">
+                                            {{ $outputMediaInfo['bitrate_kbps'] >= 1000 ? round($outputMediaInfo['bitrate_kbps'] / 1000, 1) . ' Mbps' : $outputMediaInfo['bitrate_kbps'] . ' kbps' }}
+                                        </x-filament::badge>
+                                    @endif
+                                    @if ($outputMediaInfo['audio_codec'] ?? false)
+                                        @php
+                                            $outAudioDisplay = strtoupper($outputMediaInfo['audio_codec']);
+                                            if ($outputMediaInfo['audio_channels'] ?? false) {
+                                                $outAudioDisplay .= ' · ' . $outputMediaInfo['audio_channels'];
+                                            }
+                                        @endphp
+                                        <x-filament::badge color="warning" size="sm" icon="heroicon-s-speaker-wave">
+                                            {{ $outAudioDisplay }}
+                                        </x-filament::badge>
+                                    @endif
+                                    @if ($outputMediaInfo['container'] ?? false)
+                                        <x-filament::badge color="gray" size="sm">
+                                            {{ $outputMediaInfo['container'] }}
+                                        </x-filament::badge>
+                                    @endif
+                                </div>
+                            @endif
+
                             <!-- Action Buttons -->
                             <div class="md:flex space-y-2 md:space-y-0 items-center justify-between">
                                 <div class="flex items-center space-x-2">
