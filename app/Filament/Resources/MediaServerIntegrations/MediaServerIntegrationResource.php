@@ -2,6 +2,8 @@
 
 namespace App\Filament\Resources\MediaServerIntegrations;
 
+use App\Facades\PlaylistFacade;
+use App\Facades\ProxyFacade;
 use App\Filament\Concerns\HasCopilotSupport;
 use App\Filament\Resources\MediaServerIntegrations\Pages\CreateMediaServerIntegration;
 use App\Filament\Resources\MediaServerIntegrations\Pages\EditMediaServerIntegration;
@@ -99,23 +101,6 @@ class MediaServerIntegrationResource extends Resource implements CopilotResource
     }
 
     /**
-     * Build the external base URL for HDHR/EPG endpoints.
-     * Handles APP_URL values with or without a scheme.
-     */
-    protected static function buildHdhrBaseUrl(): string
-    {
-        $appUrl = rtrim(config('app.url'), '/');
-        if (! parse_url($appUrl, PHP_URL_SCHEME)) {
-            $appUrl = 'http://'.$appUrl;
-        }
-        $scheme = parse_url($appUrl, PHP_URL_SCHEME) ?: 'http';
-        $host = parse_url($appUrl, PHP_URL_HOST) ?: 'localhost';
-        $port = parse_url($appUrl, PHP_URL_PORT) ?: config('app.port', 36400);
-
-        return "{$scheme}://{$host}:{$port}";
-    }
-
-    /**
      * Resolve a playlist UUID to a human-readable name.
      */
     protected static function resolvePlaylistName(string $uuid): string
@@ -124,9 +109,7 @@ class MediaServerIntegrationResource extends Resource implements CopilotResource
             return '—';
         }
 
-        $playlist = Playlist::where('uuid', $uuid)->first()
-            ?? CustomPlaylist::where('uuid', $uuid)->first()
-            ?? MergedPlaylist::where('uuid', $uuid)->first();
+        $playlist = PlaylistFacade::resolvePlaylistByUuid($uuid);
 
         return $playlist ? $playlist->name : $uuid;
     }
@@ -790,9 +773,26 @@ class MediaServerIntegrationResource extends Resource implements CopilotResource
                                                     if (! $state) {
                                                         return;
                                                     }
-                                                    $baseUrl = self::buildHdhrBaseUrl();
-                                                    $set('hdhr_base_url', "{$baseUrl}/{$state}/hdhr");
-                                                    $set('epg_url', "{$baseUrl}/{$state}/epg.xml");
+
+                                                    $playlist = PlaylistFacade::resolvePlaylistByUuid($state);
+                                                    if (! $playlist) {
+                                                        return;
+                                                    }
+
+                                                    // Build HDHR and EPG URLs using ProxyFacade which respects
+                                                    // the url_override setting and is request-aware via url('')
+                                                    $baseUrl = ProxyFacade::getBaseUrl();
+                                                    $uuid = $playlist->uuid;
+
+                                                    $playlistAuth = method_exists($playlist, 'playlistAuths')
+                                                        ? $playlist->playlistAuths()->where('enabled', true)->first()
+                                                        : null;
+                                                    $hdhrAuthPath = $playlistAuth
+                                                        ? '/'.rawurlencode($playlistAuth->username).'/'.rawurlencode($playlistAuth->password)
+                                                        : '';
+
+                                                    $set('hdhr_base_url', $baseUrl."/{$uuid}/hdhr{$hdhrAuthPath}");
+                                                    $set('epg_url', $baseUrl."/{$uuid}/epg.xml");
                                                 })
                                                 ->required(),
                                             Placeholder::make('tvg_id_warning')
@@ -802,21 +802,19 @@ class MediaServerIntegrationResource extends Resource implements CopilotResource
                                                     if (! $uuid) {
                                                         return false;
                                                     }
-                                                    $playlist = Playlist::where('uuid', $uuid)->first()
-                                                        ?? CustomPlaylist::where('uuid', $uuid)->first()
-                                                        ?? MergedPlaylist::where('uuid', $uuid)->first();
+                                                    $playlist = PlaylistFacade::resolvePlaylistByUuid($uuid);
 
-                                                    $value = $playlist->id_channel_by?->value ?? $playlist->id_channel_by ?? 'stream_id';
+                                                    $value = $playlist?->id_channel_by?->value ?? $playlist?->id_channel_by ?? 'stream_id';
 
                                                     return $playlist && $value !== 'number';
                                                 }),
                                             TextInput::make('hdhr_base_url')
                                                 ->label(__('HDHR Base URL'))
-                                                ->helperText(__('This URL must be reachable from your Plex server. Use your machine\\\'s LAN IP, not localhost.'))
+                                                ->helperText(__('This URL must be reachable from your Plex server. Uses the Proxy URL Override or APP_URL. Adjust if Plex reaches m3u-editor via a different address (e.g. Docker internal IP).'))
                                                 ->required(),
                                             TextInput::make('epg_url')
                                                 ->label(__('EPG URL'))
-                                                ->helperText(__('XMLTV EPG guide URL. Must also be reachable from Plex.'))
+                                                ->helperText(__('XMLTV EPG guide URL. Must also be reachable from Plex. Adjust if needed.'))
                                                 ->required(),
                                             TextInput::make('dvr_country')
                                                 ->label(__('Country Code'))

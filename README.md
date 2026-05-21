@@ -1,6 +1,12 @@
-# m3u editor
+<div align="center">
 
-![logo](./public/favicon.png)
+  <img src="./public/favicon.png" width="96">
+
+<h3>m3u editor</h3>
+
+English | [中文](./README-ZH.md)
+
+</div>
 
 A full-featured and powerful `IPTV` editor, including features similar to **xteve** or **threadfin**. Also includes full `EPG` management, full Xtream API output, series management with ability to store and sync .strm files, post processing with ability to call custom scripts, send webhook requests, or send an email, and much more!
 
@@ -13,8 +19,6 @@ EPG support for XMLTV files (local or remote), XMLTV URLs, and full **Schedules 
 Feel free to [open an issue](https://github.com/sparkison/m3u-editor/issues/new?template=bug_report.md) on this repo, or hit us up on [Discord](https://discord.gg/rS3abJ5dz7)
 
 ### Join us on Discord
-
-[![](https://dcbadge.limes.pink/api/server/rS3abJ5dz7)](https://discord.gg/rS3abJ5dz7)
 
 Join our [Discord](https://discord.gg/rS3abJ5dz7) server to ask questions and get help, help others, suggest new ideas, and offer suggestions for improvements! You can also try out and help test new features! 🎉
 

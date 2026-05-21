@@ -3,7 +3,9 @@
 namespace App\Jobs;
 
 use App\Enums\Status;
+use App\Enums\SyncRunPhase;
 use App\Models\Playlist;
+use App\Services\SyncPipelineService;
 use App\Settings\GeneralSettings;
 use Filament\Notifications\Notification;
 use Illuminate\Contracts\Queue\ShouldQueue;
@@ -20,12 +22,16 @@ class ProcessVodChannelsComplete implements ShouldQueue
 
     /**
      * Create a new job instance.
+     *
+     * @param  ShouldQueue|null  $completionJob  Job to dispatch at the end of the full VOD
+     *                                           pipeline (after STRM sync). Null for UI-triggered
+     *                                           refreshes that don't need a downstream event.
      */
     public function __construct(
         public Playlist $playlist,
-    ) {
-        //
-    }
+        public ?ShouldQueue $completionJob = null,
+        public ?int $syncRunId = null,
+    ) {}
 
     /**
      * Execute the job.
@@ -53,36 +59,41 @@ class ProcessVodChannelsComplete implements ShouldQueue
             ->broadcast($this->playlist->user)
             ->sendToDatabase($this->playlist->user);
 
-        // Now that all metadata chunks are done, dispatch TMDB fetch and/or STRM sync.
-        // This avoids the race condition where SyncVodStrmFiles fired before chunks completed.
-        $postJobs = [];
+        // Pipeline path: delegate next-phase dispatch to SyncPipelineService.
+        if ($this->syncRunId) {
+            Log::info('VOD Complete: Handing off to SyncPipeline. run='.$this->syncRunId);
+            app(SyncPipelineService::class)->completePhase($this->syncRunId, SyncRunPhase::VodMetadata);
 
-        if ($settings->tmdb_auto_lookup_on_import) {
-            Log::info('VOD Complete: Queuing bulk TMDB fetch for playlist ID '.$this->playlist->id);
-            $postJobs[] = new FetchTmdbIds(
-                vodPlaylistId: $this->playlist->id,
-                user: $this->playlist->user,
-                sendCompletionNotification: false,
-            );
+            return;
         }
+
+        // Legacy path — build and dispatch post-metadata chain manually.
+        $postTmdbJobs = [];
 
         if ($this->playlist->auto_sync_vod_stream_files) {
             Log::info('VOD Complete: Queuing STRM sync for playlist ID '.$this->playlist->id);
             $hasFindReplaceRules = collect($this->playlist->find_replace_rules ?? [])
                 ->contains(fn (array $rule): bool => $rule['enabled'] ?? false);
             if ($hasFindReplaceRules) {
-                // Find & Replace runs concurrently with VOD metadata fetch (dispatched by
-                // SyncListener). Chain it here too so STRM sync is guaranteed to use
-                // the processed title_custom values, not stale ones.
-                $postJobs[] = new RunPlaylistFindReplaceRules($this->playlist);
+                $postTmdbJobs[] = new RunPlaylistFindReplaceRules($this->playlist);
             }
-            $postJobs[] = new SyncVodStrmFiles(
-                playlist: $this->playlist,
-            );
+            $postTmdbJobs[] = new SyncVodStrmFiles(playlist: $this->playlist);
         }
 
-        if (! empty($postJobs)) {
-            Bus::chain($postJobs)->dispatch();
+        if ($this->completionJob) {
+            $postTmdbJobs[] = $this->completionJob;
+        }
+
+        if ($settings->tmdb_auto_lookup_on_import) {
+            Log::info('VOD Complete: Queuing bulk TMDB fetch for playlist ID '.$this->playlist->id);
+            FetchTmdbIds::dispatch(
+                vodPlaylistId: $this->playlist->id,
+                user: $this->playlist->user,
+                sendCompletionNotification: false,
+                postCompletionJobs: $postTmdbJobs,
+            );
+        } elseif (! empty($postTmdbJobs)) {
+            Bus::chain($postTmdbJobs)->dispatch();
         }
     }
 }

@@ -44,6 +44,12 @@ class PluginValidator
             $errors[] = 'Plugin api_version does not match host plugin API version.';
         }
 
+        if (isset($manifestData['repository']) && $manifestData['repository'] !== '') {
+            if (! preg_match('#^[a-zA-Z0-9._-]+/[a-zA-Z0-9._-]+$#', (string) $manifest->repository)) {
+                $errors[] = 'Manifest field [repository] must be in \"owner/repo\" format (GitHub URL is normalized during parsing).';
+            }
+        }
+
         $knownCapabilities = array_keys(config('plugins.capabilities', []));
         foreach ($manifest->capabilities as $capability) {
             if (! in_array($capability, $knownCapabilities, true)) {
@@ -536,13 +542,45 @@ class PluginValidator
     private function validateFieldDefinition(array $field, array $fieldTypes, string $group): array
     {
         $errors = [];
+        $type = $field['type'] ?? 'text';
         $fieldId = $field['id'] ?? null;
+
+        if ($type === 'section') {
+            // Sections do not require an [id]; fall back to the label for readable error paths.
+            // Nested sections (sections within sections) are supported via recursive validation.
+            $qualifier = $fieldId ?? ($field['label'] ?? 'section');
+            $qualifiedGroup = "{$group}.{$qualifier}";
+
+            if (blank($field['label'] ?? null)) {
+                $errors[] = "{$qualifiedGroup} section fields require [label]";
+            }
+
+            if (! is_array($field['fields'] ?? null) || ($field['fields'] ?? []) === []) {
+                $errors[] = "{$qualifiedGroup} section fields require non-empty [fields]";
+
+                return $errors;
+            }
+
+            foreach ($field['fields'] as $nestedField) {
+                if (! is_array($nestedField)) {
+                    $errors[] = "{$qualifiedGroup} section fields must be objects";
+
+                    continue;
+                }
+
+                $errors = [
+                    ...$errors,
+                    ...$this->validateFieldDefinition($nestedField, $fieldTypes, $qualifiedGroup),
+                ];
+            }
+
+            return $errors;
+        }
 
         if (blank($fieldId)) {
             return ["{$group} field is missing [id]"];
         }
 
-        $type = $field['type'] ?? 'text';
         if (! in_array($type, $fieldTypes, true)) {
             $errors[] = "{$group}.{$fieldId} uses unsupported type [{$type}]";
         }

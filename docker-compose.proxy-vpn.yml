@@ -75,9 +75,13 @@ services:
     volumes:
       # Persistent configuration data
       - ./data:/var/www/config
-      
+
       # PostgreSQL data persistence
       - pgdata:/var/lib/postgresql/data
+
+      # User-uploaded assets (logos, images, etc.)
+      # Without this, uploaded assets are lost on container recreation
+      - ./storage:/var/www/html/storage/app/public
     restart: unless-stopped
     depends_on:
       gluetun:
@@ -148,7 +152,7 @@ services:
     volumes:
       - redis-data:/data
     restart: unless-stopped
-    command: redis-server --port ${REDIS_PORT:-6379} --requirepass ${REDIS_PASSWORD:-changeme} --appendonly no --save "" --maxmemory 256mb --maxmemory-policy allkeys-lru
+    command: redis-server --port ${REDIS_PORT:-6379} --requirepass ${REDIS_PASSWORD:-changeme} --appendonly no --save "" --maxmemory 256mb --maxmemory-policy allkeys-lru --loglevel warning
     healthcheck:
       test: ["CMD", "redis-cli", "-p", "${REDIS_PORT:-6379}", "-a", "${REDIS_PASSWORD:-changeme}", "ping"]
       interval: 10s

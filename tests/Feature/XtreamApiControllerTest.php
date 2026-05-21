@@ -5,6 +5,7 @@ namespace Tests\Feature;
 use App\Enums\ChannelLogoType;
 use App\Jobs\MergeChannels;
 use App\Jobs\UnmergeChannels;
+use App\Models\Category;
 use App\Models\Channel;
 use App\Models\Group;
 use App\Models\Playlist;
@@ -429,8 +430,8 @@ class XtreamApiControllerTest extends TestCase
     public function test_get_vod_info_missing_vod_id_parameter()
     {
         $response = $this->getJson($this->getXtreamApiUrl('get_vod_info')); // No vod_id param
-        $response->assertStatus(404) // Controller returns 404 when VOD not found (null vod_id)
-            ->assertJson(['error' => 'VOD not found']);
+        $response->assertStatus(400)
+            ->assertJson(['error' => 'vod_id parameter is required for get_vod_info action']);
     }
 
     /**
@@ -685,5 +686,106 @@ class XtreamApiControllerTest extends TestCase
 
         $response->assertStatus(403)
             ->assertJson(['error' => 'Unauthorized or stream not found']);
+    }
+
+    public function test_get_series_with_logo_proxy_handles_null_backdrop_paths(): void
+    {
+        $this->playlist->update(['enable_logo_proxy' => true]);
+
+        $category = Category::factory()->for($this->user)->create();
+
+        Series::factory()->create([
+            'user_id' => $this->user->id,
+            'playlist_id' => $this->playlist->id,
+            'category_id' => $category->id,
+            'enabled' => true,
+            'backdrop_path' => json_encode([null, 'https://example.com/img.jpg', null]),
+            'cover' => 'https://example.com/cover.jpg',
+            'metadata' => json_encode(['tmdb' => '', 'last_modified' => null]),
+        ]);
+
+        $response = $this->getJson($this->getXtreamApiUrl('get_series'));
+
+        $response->assertOk();
+        $response->assertJsonCount(1);
+    }
+
+    public function test_get_series_categories_orders_by_sort_order_for_regular_playlist(): void
+    {
+        $third = Category::factory()->for($this->user)->for($this->playlist)->create([
+            'name' => 'Third',
+            'sort_order' => 30,
+        ]);
+        $first = Category::factory()->for($this->user)->for($this->playlist)->create([
+            'name' => 'First',
+            'sort_order' => 10,
+        ]);
+        $second = Category::factory()->for($this->user)->for($this->playlist)->create([
+            'name' => 'Second',
+            'sort_order' => 20,
+        ]);
+
+        foreach ([$first, $second, $third] as $category) {
+            Series::factory()->create([
+                'user_id' => $this->user->id,
+                'playlist_id' => $this->playlist->id,
+                'category_id' => $category->id,
+                'enabled' => true,
+            ]);
+        }
+
+        $response = $this->getJson($this->getXtreamApiUrl('get_series_categories'));
+
+        $response->assertOk();
+        $this->assertSame(
+            ['First', 'Second', 'Third'],
+            array_column($response->json(), 'category_name'),
+        );
+    }
+
+    public function test_get_live_streams_tv_archive_enabled_when_shift_set()
+    {
+        $group = Group::factory()->for($this->user)->create();
+
+        // Channel with shift > 0 but no catchup value (custom channel scenario)
+        $channelWithShift = Channel::factory()->for($this->playlist)->for($group)->create([
+            'enabled' => true,
+            'title_custom' => 'Channel With Shift',
+            'shift' => 12,
+            'catchup' => null,
+        ]);
+
+        // Channel with catchup set (provider-imported scenario)
+        $channelWithCatchup = Channel::factory()->for($this->playlist)->for($group)->create([
+            'enabled' => true,
+            'title_custom' => 'Channel With Catchup',
+            'shift' => 24,
+            'catchup' => 'default',
+        ]);
+
+        // Channel with no shift and no catchup
+        $channelWithoutArchive = Channel::factory()->for($this->playlist)->for($group)->create([
+            'enabled' => true,
+            'title_custom' => 'Channel Without Archive',
+            'shift' => 0,
+            'catchup' => null,
+        ]);
+
+        $response = $this->getJson($this->getXtreamApiUrl('get_live_streams'));
+        $response->assertStatus(200);
+
+        $jsonResponse = $response->json();
+
+        $shiftData = collect($jsonResponse)->firstWhere('stream_id', $channelWithShift->id);
+        $this->assertEquals(1, $shiftData['tv_archive'], 'tv_archive should be 1 when shift > 0');
+        $this->assertEquals(12, $shiftData['tv_archive_duration']);
+
+        $catchupData = collect($jsonResponse)->firstWhere('stream_id', $channelWithCatchup->id);
+        $this->assertEquals(1, $catchupData['tv_archive'], 'tv_archive should be 1 when catchup is set');
+        $this->assertEquals(24, $catchupData['tv_archive_duration']);
+
+        $noArchiveData = collect($jsonResponse)->firstWhere('stream_id', $channelWithoutArchive->id);
+        $this->assertEquals(0, $noArchiveData['tv_archive'], 'tv_archive should be 0 when no shift and no catchup');
+        $this->assertEquals(0, $noArchiveData['tv_archive_duration']);
     }
 }

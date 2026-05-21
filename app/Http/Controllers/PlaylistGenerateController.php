@@ -203,7 +203,8 @@ class PlaylistGenerateController extends Controller
                     // Format the URL in Xtream Codes format if not disabled
                     // This way we can perform additional stream analysis, check for stream limits, etc.
                     // When disabled, will return the raw URL from the channel (or the proxyfied URL if proxy enabled)
-                    if (! (config('app.disable_m3u_xtream_format') ?? false)) {
+                    $useInternalXtreamFormat = ! ((config('app.disable_m3u_xtream_format') ?? false) || $playlist->disable_m3u_xtream_format);
+                    if ($useInternalXtreamFormat) {
                         $urlPath = 'live';
                         if ($channel->is_vod) {
                             $urlPath = 'movie';
@@ -230,7 +231,6 @@ class PlaylistGenerateController extends Controller
                         // m3u-editor rather than going directly to the provider.
                         // This also ensures catchup works for Xtream-imported channels that have
                         // tv_archive=1 but no catchup_source URL template stored.
-                        $useInternalXtreamFormat = ! (config('app.disable_m3u_xtream_format') ?? false);
                         if (($proxyEnabled || $useInternalXtreamFormat) && $channel->catchup) {
                             $catchupExt = $extension ?: 'ts';
                             $catchupSource = "{$baseUrl}/timeshift/{$username}/{$password}/{duration}/{start}/{$channel->id}.{$catchupExt}";
@@ -271,7 +271,7 @@ class PlaylistGenerateController extends Controller
                 // If the playlist includes series in M3U, include the series episodes
                 if ($playlist->include_series_in_m3u) {
                     // Get the seasons
-                    $series = $playlist->series()
+                    foreach ($playlist->series()
                         ->where('series.enabled', true)
                         ->with([
                             'category',
@@ -280,9 +280,11 @@ class PlaylistGenerateController extends Controller
                             },
                         ])
                         ->orderBy('sort')
-                        ->get();
+                        ->lazyById(50) as $s) {
+                        // Get series movie DB ID's as fallbacks for episode
+                        $movieDbIds = $s->getMovieDbIds() ?? [];
+                        $seriesTmdbId = $movieDbIds['tmdb'] ?? $movieDbIds['tvdb'] ?? $movieDbIds['imdb'] ?? null;
 
-                    foreach ($series as $s) {
                         // Append the episodes
                         foreach ($s->episodes as $episode) {
                             // Set channel variables
@@ -292,7 +294,7 @@ class PlaylistGenerateController extends Controller
                             $url = PlaylistUrlService::getEpisodeUrl($episode, $playlist);
                             $title = $episode->title;
                             $runtime = $episode->info['duration_secs'] ?? -1;
-                            $icon = $episode->info['movie_image'] ?? $streamId->info['cover'] ?? '';
+                            $icon = $episode->info['movie_image'] ?? $s->cover ?? '';
                             if (empty($icon)) {
                                 $icon = url('/placeholder.png');
                             }
@@ -300,7 +302,7 @@ class PlaylistGenerateController extends Controller
                             if ($logoProxyEnabled) {
                                 $icon = LogoProxyController::generateProxyUrl($icon);
                             }
-                            if (! (config('app.disable_m3u_xtream_format') ?? false) || $proxyEnabled) {
+                            if (! ((config('app.disable_m3u_xtream_format') ?? false) || $playlist->disable_m3u_xtream_format) || $proxyEnabled) {
                                 $containerExtension = $episode->container_extension ?? 'mp4';
                                 $url = $baseUrl."/series/{$username}/{$password}/".$episode->id.".{$containerExtension}";
                             }
@@ -332,9 +334,20 @@ class PlaylistGenerateController extends Controller
                             }
 
                             $extInf = "#EXTINF:$runtime";
-                            $episodeTmdbId = $episode->tmdb_id ?: ($episode->info['tmdb_id'] ?? null);
+                            // Fallback to series TMDB ID if episode not set
+                            $episodeTmdbId = $episode->tmdb_id ?: ($episode->info['tmdb_id'] ?? null) ?: $seriesTmdbId;
                             if ($episodeTmdbId) {
                                 $extInf .= " tmdb-id=\"{$episodeTmdbId}\"";
+                            }
+
+                            // Add season and episode information
+                            $seasonNum = $episode->season;
+                            $episodeNum = $episode->episode_num;
+                            if ($seasonNum !== null) {
+                                $extInf .= " tvg-season=\"{$seasonNum}\"";
+                            }
+                            if ($episodeNum !== null) {
+                                $extInf .= " tvg-episode=\"{$episodeNum}\"";
                             }
                             $extInf .= " tvg-chno=\"$channelNo\" tvg-id=\"$tvgId\" tvg-name=\"$name\" tvg-logo=\"$icon\" group-title=\"$group\"";
                             echo "$extInf,".$title."\n";
@@ -641,7 +654,7 @@ class PlaylistGenerateController extends Controller
     /**
      * Build the base query for channels for a playlist.
      */
-    public static function getChannelQuery($playlist): mixed
+    public static function getChannelQuery($playlist, ?bool $isVod = null): mixed
     {
         // Build the base query for channels. We'll use cursor() to stream
         // results rather than loading all channels into memory.
@@ -652,9 +665,9 @@ class PlaylistGenerateController extends Controller
         $query = $playlist->channels()
             ->leftJoin('groups', 'channels.group_id', '=', 'groups.id')
             ->where('channels.enabled', true)
-            ->when(! $playlist->include_vod_in_m3u, function ($q) {
-                $q->where('channels.is_vod', false);
-            })
+            ->when($isVod === true, fn ($q) => $q->where('channels.is_vod', true))
+            ->when($isVod === false, fn ($q) => $q->where('channels.is_vod', false))
+            ->when($isVod === null && ! $playlist->include_vod_in_m3u, fn ($q) => $q->where('channels.is_vod', false))
             // Select the channel columns and also pull through group name and (for custom)
             // the custom tag name/order so we can order in SQL and avoid a PHP-side resort.
             ->selectRaw('channels.*')
@@ -669,32 +682,41 @@ class PlaylistGenerateController extends Controller
             // Alias the external EPG channel identifier to avoid clobbering the FK attribute
             ->selectRaw('epg_channels.channel_id as epg_channel_key');
 
-        // If custom playlist (or alias of one), left join tags through the taggables polymorphic table
+        // If custom playlist (or alias of one), use correlated subqueries to retrieve the
+        // custom tag order/name without JOINing taggables, which would produce duplicate
+        // rows for channels that belong to more than one tag in this playlist.
         $isCustomContext = $playlist instanceof CustomPlaylist
             || ($playlist instanceof PlaylistAlias && ! empty($playlist->custom_playlist_id));
         if ($isCustomContext) {
-            $query->leftJoin('taggables', function ($join) {
-                $join->on('channels.id', '=', 'taggables.taggable_id')
-                    ->where('taggables.taggable_type', '=', Channel::class);
-            });
+            $orderSubquery = '(SELECT MIN(t.order_column) FROM taggables tb INNER JOIN tags t ON t.id = tb.tag_id WHERE tb.taggable_id = channels.id AND tb.taggable_type = ? AND t.type = ?)';
 
-            $query->leftJoin('tags as custom_tags', function ($join) use ($playlistUuid) {
-                $join->on('taggables.tag_id', '=', 'custom_tags.id')
-                    ->where('custom_tags.type', '=', $playlistUuid);
-            });
-
-            // Order by custom tag order when present, otherwise fall back to group sort_order
-            $query->orderByRaw('COALESCE(custom_tags.order_column, groups.sort_order)')
-                ->orderBy('channels.sort')
-                ->orderBy('channels.channel')
+            $query->selectRaw("{$orderSubquery} as custom_order", [Channel::class, $playlistUuid])
+                ->selectRaw(
+                    '(SELECT t.name FROM taggables tb INNER JOIN tags t ON t.id = tb.tag_id WHERE tb.taggable_id = channels.id AND tb.taggable_type = ? AND t.type = ? ORDER BY t.order_column ASC LIMIT 1) as custom_group_name',
+                    [Channel::class, $playlistUuid]
+                )
+                ->orderByRaw("COALESCE({$orderSubquery}, groups.sort_order)", [Channel::class, $playlistUuid])
+                ->orderByRaw('COALESCE(channel_custom_playlist.sort, channels.sort)')
+                ->orderByRaw('COALESCE(channel_custom_playlist.channel_number, channels.channel)')
                 ->orderBy('channels.title');
-
-            // Include the custom tag name/order in the selected columns
-            // Note: custom_tags.name is a JSON field with translations like {"en":"Name"}
-            // We'll decode it in PHP to extract the locale-specific value
-            $query->selectRaw('custom_tags.name as custom_group_name')
-                ->selectRaw('custom_tags.order_column as custom_order');
         } else {
+            // Per-alias custom live group ordering (optional). When enabled, the
+            // selected live groups are ranked by the alias's saved order; any group
+            // not in that list (and VOD groups) falls back to the playlist's own
+            // group sort order below.
+            if ($playlist instanceof PlaylistAlias && $playlist->hasCustomLiveGroupSort()) {
+                $order = array_values($playlist->getLiveGroupSortOrder());
+                $whenClauses = [];
+                foreach ($order as $index => $groupName) {
+                    $whenClauses[] = "WHEN ? THEN {$index}";
+                }
+                $elseValue = count($order);
+                $query->orderByRaw(
+                    'CASE channels.group_internal '.implode(' ', $whenClauses)." ELSE {$elseValue} END",
+                    $order
+                );
+            }
+
             // Standard ordering for non-custom playlists
             $query->orderBy('groups.sort_order')
                 ->orderBy('channels.sort')

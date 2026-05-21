@@ -180,7 +180,6 @@ class EpgApiController extends Controller
         $skip = max(0, ($page - 1) * $perPage);
         $search = $request->get('search', null);
         $group = $request->get('group', null) ?: null;
-        $vod = (bool) $request->get('vod', false);
         $username = $request->get('username', null);
         $password = $request->get('password', null);
 
@@ -250,9 +249,9 @@ class EpgApiController extends Controller
                     $channelNo = ++$channelNumber;
                 }
 
-                // Ensure we always have a unique identifier for the channel
-                // Use database ID as fallback if channel number is not set
-                $channelKey = $channelNo ?: $channel->id;
+                // Always use the database primary key as the array key to guarantee uniqueness.
+                // Duplicate channel numbers would otherwise overwrite earlier entries.
+                $channelKey = $channel->id;
                 if ($epgId) {
                     $epgIds[] = $epgId;
                     if (! isset($epgChannelMap[$epgId])) {
@@ -303,7 +302,7 @@ class EpgApiController extends Controller
                     $dummyEpgChannels[] = [
                         'playlist_channel_id' => $channelKey,
                         'display_name' => $channel->title_custom ?? $channel->title,
-                        'display_title' => $channel->title_custom ?? $channel->title ?? $channel->name_custom ?? $channel->name,
+                        'display_title' => $channel->display_title,
                         'title' => $channel->name_custom ?? $channel->name,
                         'icon' => $icon,
                         'channel_number' => $channelNo,
@@ -370,7 +369,7 @@ class EpgApiController extends Controller
                     'cast_unavailable_reason' => $channelResults['cast_unavailable_reason'] ?? null,
                     'tvg_id' => $tvgId,
                     'display_name' => $channel->title_custom ?? $channel->title,
-                    'display_title' => $channelResults['display_title'] ?? $channel->title_custom ?? $channel->title ?? $channel->name_custom ?? $channel->name,
+                    'display_title' => $channelResults['display_title'] ?? $channel->display_title,
                     'title' => $channelResults['title'] ?? $channel->name_custom ?? $channel->name,
                     'channel_number' => $channelNo,
                     'group' => $channel->group ?? $channel->group_internal,
@@ -382,24 +381,27 @@ class EpgApiController extends Controller
                 ];
             }
 
-            // Apply pagination to playlist channels
-            $totalChannels = $playlist->channels()->when($search, function ($queryBuilder) use ($search) {
-                $search = Str::lower($search);
+            // Apply pagination to playlist channels — use the same base query as the data
+            // fetch so the count reflects identical filters (VOD setting, enabled, custom
+            // tag deduplication) and stays consistent with the paginated results.
+            $totalChannels = PlaylistGenerateController::getChannelQuery($playlist)
+                ->when($search, function ($queryBuilder) use ($search) {
+                    $search = Str::lower($search);
 
-                return $queryBuilder->where(function ($query) use ($search) {
-                    $query->whereRaw('LOWER(channels.name) LIKE ?', ['%'.$search.'%'])
-                        ->orWhereRaw('LOWER(channels.name_custom) LIKE ?', ['%'.$search.'%'])
-                        ->orWhereRaw('LOWER(channels.title) LIKE ?', ['%'.$search.'%'])
-                        ->orWhereRaw('LOWER(channels.title_custom) LIKE ?', ['%'.$search.'%']);
-                });
-            })->when($group, function ($queryBuilder) use ($group) {
-                $g = $queryBuilder->getQuery()->getGrammar();
-                $coalesce = 'COALESCE('.$g->wrap('channels.group').', '.$g->wrap('channels.group_internal').')';
+                    return $queryBuilder->where(function ($query) use ($search) {
+                        $query->whereRaw('LOWER(channels.name) LIKE ?', ['%'.$search.'%'])
+                            ->orWhereRaw('LOWER(channels.name_custom) LIKE ?', ['%'.$search.'%'])
+                            ->orWhereRaw('LOWER(channels.title) LIKE ?', ['%'.$search.'%'])
+                            ->orWhereRaw('LOWER(channels.title_custom) LIKE ?', ['%'.$search.'%']);
+                    });
+                })
+                ->when($group, function ($queryBuilder) use ($group) {
+                    $g = $queryBuilder->getQuery()->getGrammar();
+                    $coalesce = 'COALESCE('.$g->wrap('channels.group').', '.$g->wrap('channels.group_internal').')';
 
-                return $queryBuilder->whereRaw("LOWER({$coalesce}) = ?", [Str::lower($group)]);
-            })->when(! $vod, function ($query) {
-                return $query->where('channels.is_vod', false);
-            })->where('enabled', true)->count();
+                    return $queryBuilder->whereRaw("LOWER({$coalesce}) = ?", [Str::lower($group)]);
+                })
+                ->count();
 
             $channels = $playlistChannelData;
 
@@ -774,17 +776,20 @@ class EpgApiController extends Controller
         }
 
         $vod = (bool) $request->get('vod', false);
+        $includeVod = $vod && $playlist->include_vod_in_m3u;
 
         $channelQuery = $playlist->channels();
         $g = $channelQuery->getQuery()->getGrammar();
         $coalesce = 'COALESCE('.$g->wrap('channels.group').', '.$g->wrap('channels.group_internal').')';
 
         $groups = $channelQuery
+            ->leftJoin('groups', 'channels.group_id', '=', 'groups.id')
             ->selectRaw("{$coalesce} as effective_group")
-            ->when(! $vod, function ($q) {
+            ->when(! $includeVod, function ($q) {
                 $q->where('channels.is_vod', false);
             })
             ->where('channels.enabled', true)
+            ->where(fn ($q) => $q->where('groups.enabled', true)->orWhereNull('channels.group_id'))
             ->whereRaw("{$coalesce} IS NOT NULL")
             ->whereRaw("{$coalesce} != ''")
             ->groupByRaw($coalesce)

@@ -50,8 +50,8 @@ class PluginManager
             $manifest = $result->manifest;
             $pluginId = $result->pluginId ?? basename($pluginPath);
 
-            $record = Plugin::query()->where('plugin_id', $pluginId)->first()
-                ?? new Plugin(['plugin_id' => $pluginId]);
+            $existing = Plugin::query()->where('plugin_id', $pluginId)->first();
+            $record = $existing ?? new Plugin(['plugin_id' => $pluginId]);
             $securityState = $this->determineSecurityState($record, $result, file_exists($pluginPath));
             $attributes = [
                 'name' => $manifest?->name ?? Arr::get($result->manifestData, 'name', $pluginId),
@@ -67,6 +67,7 @@ class PluginManager
                 'schema_definition' => $manifest?->schema ?? Arr::get($result->manifestData, 'schema', []),
                 'settings_schema' => $manifest?->settings ?? Arr::get($result->manifestData, 'settings', []),
                 'data_ownership' => $manifest?->dataOwnership ?? Arr::get($result->manifestData, 'data_ownership', []),
+                'repository' => $manifest?->repository ?? $record->repository,
                 'path' => $pluginPath,
                 'source_type' => $this->determineSourceType($pluginPath, $record),
                 'available' => true,
@@ -84,6 +85,12 @@ class PluginManager
                 'last_validated_at' => now(),
             ];
 
+            // Brand-new discoveries have never been through the install flow.
+            // Default to uninstalled so they don't appear as ghost-installed plugins.
+            if (! $existing) {
+                $attributes['installation_status'] = 'uninstalled';
+            }
+
             $record = Plugin::query()->updateOrCreate(
                 ['plugin_id' => $pluginId],
                 $attributes,
@@ -93,21 +100,24 @@ class PluginManager
             $discovered[] = $record->fresh();
         }
 
-        if ($seenPaths !== []) {
-            $missingPlugins = Plugin::query()
-                ->whereNotIn('path', $seenPaths)
-                ->get();
+        // Always sweep for stale records — plugins with a path on record that is
+        // no longer discovered. Official stubs (path = null) are intentionally
+        // pathless and are excluded from this cleanup.
+        $missingPlugins = Plugin::query()
+            ->whereNotNull('path')
+            ->when($seenPaths !== [], fn ($q) => $q->whereNotIn('path', $seenPaths))
+            ->get()
+            ->filter(fn (Plugin $p) => ! is_dir((string) $p->path));
 
-            foreach ($missingPlugins as $missingPlugin) {
-                $trustState = $missingPlugin->isBlocked() ? 'blocked' : 'pending_review';
-                $missingPlugin->update([
-                    'available' => false,
-                    'enabled' => false,
-                    'integrity_status' => 'missing',
-                    'trust_state' => $trustState,
-                    'trust_reason' => 'Plugin files are missing from disk and require operator review.',
-                ]);
-            }
+        foreach ($missingPlugins as $missingPlugin) {
+            $trustState = $missingPlugin->isBlocked() ? 'blocked' : 'pending_review';
+            $missingPlugin->update([
+                'available' => false,
+                'enabled' => false,
+                'integrity_status' => 'missing',
+                'trust_state' => $trustState,
+                'trust_reason' => 'Plugin files are missing from disk and require operator review.',
+            ]);
         }
 
         return $discovered;
@@ -115,6 +125,18 @@ class PluginManager
 
     public function validate(Plugin $plugin): Plugin
     {
+        // Official stubs and other pathless records have no files to validate.
+        // Calling validatePath("") on them rewrites their trust state — guard early.
+        if (! $plugin->path) {
+            $plugin->update([
+                'available' => false,
+                'enabled' => false,
+                'last_validated_at' => now(),
+            ]);
+
+            return $plugin->fresh();
+        }
+
         $result = $this->validator->validatePath((string) $plugin->path);
         $securityState = $this->determineSecurityState($plugin, $result, file_exists((string) $plugin->path));
 
@@ -132,6 +154,7 @@ class PluginManager
             'schema_definition' => $result->manifest?->schema ?? $plugin->schema_definition,
             'settings_schema' => $result->manifest?->settings ?? $plugin->settings_schema,
             'data_ownership' => $result->manifest?->dataOwnership ?? $plugin->data_ownership,
+            'repository' => $result->manifest?->repository ?? $plugin->repository,
             'validation_status' => $result->valid ? 'valid' : 'invalid',
             'validation_errors' => $result->errors,
             'manifest_hash' => $result->hashes['manifest_hash'] ?? null,
@@ -518,8 +541,14 @@ class PluginManager
             'source_type' => $review->source_type,
             'installation_status' => 'installed',
             'available' => true,
+            'repository' => $plugin->repository ?? $this->repositoryFromReview($review),
         ]);
         $plugin = $this->validate($plugin->fresh());
+
+        // Auto-trust installs from trusted orgs/official sources when configured to do so.
+        if (! $trust && config('plugins.auto_trust_official', true)) {
+            $trust = $this->reviewAutoTrustAllowed($review);
+        }
 
         $review->update([
             'status' => $trust ? 'approved' : 'installed',
@@ -607,6 +636,23 @@ class PluginManager
         ]);
 
         return $plugin->fresh();
+    }
+
+    /**
+     * Derive a repository shorthand from a GitHub release install review.
+     */
+    private function repositoryFromReview(PluginInstallReview $review): ?string
+    {
+        if ($review->source_type !== 'github_release') {
+            return null;
+        }
+
+        $metadata = $review->source_metadata;
+        if (! is_array($metadata) || ! isset($metadata['owner'], $metadata['repo'])) {
+            return null;
+        }
+
+        return $metadata['owner'].'/'.$metadata['repo'];
     }
 
     public function executeAction(
@@ -1078,7 +1124,7 @@ class PluginManager
                 ];
             }
 
-            if (! $this->trustWithoutReviewAllowed($plugin) && ! $this->approvedReviewForPlugin($plugin)) {
+            if ($plugin->isInstalled() && ! $this->trustWithoutReviewAllowed($plugin) && ! $this->approvedReviewForPlugin($plugin)) {
                 $issues[] = [
                     'plugin_id' => $plugin->plugin_id,
                     'level' => $plugin->enabled ? 'error' : 'warning',
@@ -1333,8 +1379,58 @@ class PluginManager
             return true;
         }
 
+        // Official stubs are only seeded by SyncOfficialPlugins from server-controlled
+        // config — additionally verify the plugin_id is actually in that registry so
+        // a DB-level source_type manipulation cannot grant automatic trust.
+        if ($plugin->source_type === 'official'
+            && array_key_exists($plugin->plugin_id, config('plugins.official_plugins', []))) {
+            return true;
+        }
+
+        // For GitHub release installs, anchor trust on the download URL recorded in the
+        // review's source_metadata — not on what plugin.json claims as its repository.
+        // This prevents a malicious plugin from setting "repository": "m3ue/fake" in its
+        // manifest to bypass the review requirement.
+        $review = $this->approvedReviewForPlugin($plugin);
+        if ($review && $review->source_type === 'github_release') {
+            $repoSlug = data_get($review->source_metadata ?? [], 'repository');
+            if ($this->isFromTrustedOrg($repoSlug)) {
+                return true;
+            }
+        }
+
         return config('plugins.install_mode') === 'dev'
             && $plugin->source_type === 'local_dev';
+    }
+
+    /**
+     * Check whether an install review qualifies for automatic trust when
+     * PLUGIN_AUTO_TRUST_OFFICIAL is enabled. Only GitHub releases from a
+     * trusted org are eligible — the repo slug is read from the download
+     * metadata recorded at staging time, not from plugin.json, so a
+     * malicious manifest cannot spoof the org.
+     */
+    private function reviewAutoTrustAllowed(PluginInstallReview $review): bool
+    {
+        if ($review->source_type === 'github_release') {
+            $repoSlug = data_get($review->source_metadata ?? [], 'repository');
+
+            return $this->isFromTrustedOrg($repoSlug);
+        }
+
+        return $review->source_type === 'bundled';
+    }
+
+    public function isFromTrustedOrg(?string $repository): bool
+    {
+        if (! $repository) {
+            return false;
+        }
+
+        $parts = explode('/', ltrim($repository, '/'));
+
+        return count($parts) >= 2
+            && in_array($parts[0], config('plugins.trusted_orgs', []), true);
     }
 
     private function scanRequiredForReview(PluginInstallReview $review): bool
@@ -1841,7 +1937,7 @@ class PluginManager
     private function determineSourceType(string $pluginPath, Plugin $existing): string
     {
         if (in_array($existing->source_type, config('plugins.source_types', []), true)
-            && in_array($existing->source_type, ['staged_archive', 'github_release', 'uploaded_archive'], true)) {
+            && in_array($existing->source_type, ['staged_archive', 'github_release', 'uploaded_archive', 'official'], true)) {
             return $existing->source_type;
         }
 

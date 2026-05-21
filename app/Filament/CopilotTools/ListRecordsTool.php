@@ -19,8 +19,8 @@ class ListRecordsTool extends AbstractResourceTool
     public function schema(JsonSchema $schema): array
     {
         return [
-            'page' => $schema->integer()->description('Page number (default: 1)'),
-            'per_page' => $schema->integer()->description('Items per page (default: 15, max: 50)'),
+            'page' => $schema->integer()->description(__('Page number (default: 1)')),
+            'per_page' => $schema->integer()->description(__('Items per page (default: 15, max: 50)')),
         ];
     }
 
@@ -29,8 +29,7 @@ class ListRecordsTool extends AbstractResourceTool
         $page = max(1, (int) ($request['page'] ?? 1));
         $perPage = min(50, max(1, (int) ($request['per_page'] ?? 15)));
 
-        $model = $this->getModelClass();
-        $records = $model::query()->paginate($perPage, ['*'], 'page', $page);
+        $records = $this->getBaseQuery()->paginate($perPage, ['*'], 'page', $page);
 
         if ($records->isEmpty()) {
             return 'No '.$this->getPluralLabel().' found.';

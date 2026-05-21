@@ -2,14 +2,18 @@
 
 namespace App\Jobs;
 
+use App\Enums\SyncRunPhase;
 use App\Models\Episode;
 use App\Models\MediaServerIntegration;
+use App\Models\Playlist;
 use App\Models\Series;
 use App\Models\StreamFileSetting;
 use App\Models\StrmFileMapping;
 use App\Models\User;
 use App\Services\NfoService;
 use App\Services\PlaylistService;
+use App\Services\SerieFileNameService;
+use App\Services\SyncPipelineService;
 use App\Settings\GeneralSettings;
 use Filament\Notifications\Notification;
 use Illuminate\Contracts\Queue\ShouldQueue;
@@ -39,6 +43,11 @@ class SyncSeriesStrmFiles implements ShouldQueue
 
     /**
      * Create a new job instance.
+     *
+     * @param  array<int>|null  $series_ids  Optional list of explicit Series IDs to sync.
+     *                                       When provided, batches and cleanup/refresh are scoped to these IDs only.
+     *                                       This avoids dispatching N independent jobs (and N media server refreshes)
+     *                                       when bulk-syncing a user-selected subset of series.
      */
     public function __construct(
         public ?Series $series = null,
@@ -46,10 +55,13 @@ class SyncSeriesStrmFiles implements ShouldQueue
         public bool $all_playlists = false,
         public ?int $playlist_id = null,
         public ?int $user_id = null,
-        public ?int $batchOffset = null,  // For batch processing
+        public ?int $batchOffset = null,
         public ?int $totalBatches = null,
         public ?int $currentBatch = null,
-        public bool $isCleanupJob = false, // Special flag for final cleanup
+        public bool $isCleanupJob = false,
+        public ?array $series_ids = null,
+        public ?int $syncRunId = null,
+        public ?SyncRunPhase $completionPhase = null,
     ) {
         // Run file synces on the dedicated queue
         $this->onQueue('file_sync');
@@ -110,6 +122,9 @@ class SyncSeriesStrmFiles implements ShouldQueue
             ->when($this->playlist_id, function ($query) {
                 $query->where('playlist_id', $this->playlist_id);
             })
+            ->when($this->series_ids !== null, function ($query) {
+                $query->whereIn('id', $this->series_ids);
+            })
             ->count();
 
         if ($totalCount === 0) {
@@ -147,19 +162,23 @@ class SyncSeriesStrmFiles implements ShouldQueue
                 batchOffset: $offset,
                 totalBatches: $totalBatches,
                 currentBatch: $batch + 1,
+                series_ids: $this->series_ids,
             );
         }
 
         // Add checker job at the end of the chain
         // Last chain will trigger cleanup
         $jobs[] = new CheckSeriesStrmProgress(
-            currentOffset: $jobsInFirstChain * $batchSize,
+            currentOffset: min($jobsInFirstChain * $batchSize, $totalCount),
             totalSeries: $totalCount,
             notify: $this->notify,
             all_playlists: $this->all_playlists,
             playlist_id: $this->playlist_id,
             user_id: $this->user_id,
-            needsCleanup: true, // Cleanup will run after all chains complete
+            needsCleanup: true,
+            series_ids: $this->series_ids,
+            syncRunId: $this->syncRunId,
+            completionPhase: $this->completionPhase,
         );
 
         // Dispatch the chain
@@ -186,6 +205,9 @@ class SyncSeriesStrmFiles implements ShouldQueue
             ])
             ->when($this->playlist_id, function ($query) {
                 $query->where('playlist_id', $this->playlist_id);
+            })
+            ->when($this->series_ids !== null, function ($query) {
+                $query->whereIn('id', $this->series_ids);
             })
             ->orderBy('id')
             ->skip($this->batchOffset)
@@ -232,6 +254,18 @@ class SyncSeriesStrmFiles implements ShouldQueue
         // Get all unique sync locations for this user/playlist
         $syncLocations = StrmFileMapping::query()
             ->where('syncable_type', Episode::class)
+            ->whereHasMorph('syncable', [Episode::class], function ($q) {
+                $q->where('user_id', $this->user_id);
+                if ($this->playlist_id) {
+                    $q->where('playlist_id', $this->playlist_id);
+                }
+                if ($this->series?->id) {
+                    $q->where('series_id', $this->series->id);
+                }
+                if ($this->series_ids !== null) {
+                    $q->whereIn('series_id', $this->series_ids);
+                }
+            })
             ->distinct()
             ->pluck('sync_location')
             ->toArray();
@@ -261,6 +295,20 @@ class SyncSeriesStrmFiles implements ShouldQueue
                     ->broadcast($user)
                     ->sendToDatabase($user);
             }
+        }
+
+        // Fire series_stream_files_synced post-processes for the specific playlist
+        if (! $this->all_playlists && $this->playlist_id) {
+            $playlist = Playlist::find($this->playlist_id);
+            if ($playlist) {
+                dispatch(new FireStreamFilesSyncedEvent($playlist, 'series_stream_files_synced'));
+            }
+        }
+
+        // Advance the pipeline now that all cleanup work (orphan removal, media-server
+        // refresh, post-process events) has completed.
+        if ($this->syncRunId && $this->completionPhase) {
+            app(SyncPipelineService::class)->completePhase($this->syncRunId, $this->completionPhase);
         }
     }
 
@@ -320,6 +368,9 @@ class SyncSeriesStrmFiles implements ShouldQueue
                 if ($this->playlist_id) {
                     $query->where('playlist_id', $this->playlist_id);
                 }
+                if ($this->series_ids !== null) {
+                    $query->whereIn('id', $this->series_ids);
+                }
             })
             ->get();
 
@@ -341,6 +392,11 @@ class SyncSeriesStrmFiles implements ShouldQueue
                 $query->where('user_id', $this->user_id);
                 if ($this->playlist_id) {
                     $query->where('playlist_id', $this->playlist_id);
+                }
+                if ($this->series_ids !== null) {
+                    $query->whereHas('series', function ($q) {
+                        $q->whereIn('id', $this->series_ids);
+                    });
                 }
             })
             ->get();
@@ -606,8 +662,16 @@ class SyncSeriesStrmFiles implements ShouldQueue
                 return;
             }
 
+            // Resolve StreamFileSetting for Trash Guide naming (series → category → global default)
+            $streamFileSetting = $series->streamFileSetting
+                ?? $series->category?->streamFileSetting
+                ?? ($settings->default_series_stream_file_setting_id
+                    ? StreamFileSetting::find($settings->default_series_stream_file_setting_id)
+                    : null);
+
             // Loop through each episode
             foreach ($episodes as $ep) {
+                // Legacy filename generation (single code path; Trash Guide adds extras additively below)
                 // Setup episode prefix
                 $season = $ep->season;
                 $num = str_pad($ep->episode_num, 2, '0', STR_PAD_LEFT);
@@ -621,6 +685,19 @@ class SyncSeriesStrmFiles implements ShouldQueue
                 if (in_array('year', $filenameMetadata) && ! empty($seriesReleaseDate)) {
                     $year = substr($seriesReleaseDate, 0, 4);
                     $fileName .= " ({$year})";
+                }
+
+                // Trash Guide naming: append quality/video/audio/hdr bracket additively
+                // (provider-driven only, missing stream_stats → no extras)
+                if ($streamFileSetting?->trash_guide_naming_enabled) {
+                    try {
+                        $extras = app(SerieFileNameService::class)->generateEpisodeExtras($ep, $streamFileSetting);
+                        if ($extras !== '') {
+                            $fileName .= ' '.$extras;
+                        }
+                    } catch (\Throwable $e) {
+                        Log::warning("Trash Guide series extras build failed for episode {$ep->id}: ".$e->getMessage());
+                    }
                 }
 
                 if ($applyTmdbToEpisodes) {
@@ -647,9 +724,17 @@ class SyncSeriesStrmFiles implements ShouldQueue
 
                 // Remove consecutive replacement characters if enabled
                 if ($removeConsecutiveChars && $replaceChar !== 'remove') {
-                    $char = $replaceChar === 'space' ? ' ' : ($replaceChar === 'dash' ? '-' : ($replaceChar === 'underscore' ? '_' : '.'));
+                    $char = match ($replaceChar) {
+                        'space' => ' ',
+                        'dash' => '-',
+                        'underscore' => '_',
+                        default => '.',
+                    };
                     $fileName = preg_replace('/'.preg_quote($char, '/').'{2,}/', $char, $fileName);
                 }
+
+                // Ensure the filename (with extension) does not exceed 255 bytes.
+                $fileName = PlaylistService::truncateFilename($fileName, '.strm');
 
                 $fileName = "{$fileName}.strm";
 

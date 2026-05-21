@@ -12,11 +12,12 @@ use App\Events\EpgUpdated;
 use App\Events\PlaylistCreated;
 use App\Events\PlaylistDeleted;
 use App\Events\PlaylistUpdated;
+use App\Http\Middleware\EnsureUserCanUseCopilot;
 use App\Jobs\ProcessChannelScrubber;
 use App\Jobs\SyncMediaServer;
+use App\Listeners\AlertOnJobFailed;
 use App\Listeners\PersistUserLocale;
 use App\Livewire\BackupDestinationListRecords;
-use App\Livewire\StreamPlayer;
 use App\Livewire\TmdbSearch;
 use App\Models\Channel;
 use App\Models\ChannelFailover;
@@ -55,11 +56,13 @@ use Filament\Schemas\Components\Grid;
 use Filament\Schemas\Components\Section;
 use Filament\Support\Facades\FilamentView;
 use Filament\Tables\Columns\ImageColumn;
+use Filament\Tables\Table;
 use Filament\View\PanelsRenderHook;
 use Illuminate\Cache\RateLimiting\Limit;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Http\Request;
+use Illuminate\Queue\Events\JobFailed;
 use Illuminate\Routing\Route;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Event;
@@ -74,6 +77,7 @@ use Illuminate\Support\ServiceProvider;
 use Illuminate\Support\Str;
 use Laravel\Ai\AiManager;
 use Livewire\Livewire;
+use PDO;
 use SocialiteProviders\Manager\SocialiteWasCalled;
 use SocialiteProviders\OIDC\OIDCExtendSocialite;
 use Spatie\Tags\Tag;
@@ -92,6 +96,16 @@ class AppServiceProvider extends ServiceProvider
         $this->app->scoped(AiManager::class, fn ($app) => new PatchedAiManager($app));
 
         $this->app->singleton(GitInfoService::class);
+
+        // Detect HTTPS before any provider boot() runs, so package providers
+        // calling asset() during their boot() (e.g. filament-copilot) get the
+        // correct scheme. We can't rely on TrustProxies middleware here — it
+        // runs after all providers have booted.
+        $this->app->booting(function () {
+            if (! $this->app->runningInConsole()) {
+                $this->configureDynamicHttpsDetection();
+            }
+        });
 
         // Register Artisan commands for HLS maintenance
         if ($this->app->runningInConsole()) {
@@ -122,15 +136,15 @@ class AppServiceProvider extends ServiceProvider
             // no HTTP request context for URL generation. Force the root URL,
             // including the configured port, so route()/url() use the correct base.
             $this->configureConsoleBaseUrl();
-        } elseif (request()->hasHeader('X-Forwarded-Proto')) {
-            // Detect actual protocol from request headers
-            // This allows the app to work correctly with both HTTP and HTTPS access
-            // when behind a reverse proxy with SSL termination
-            $this->configureDynamicHttpsDetection();
         }
+        // Note: HTTP scheme detection is handled via booting() callback in register()
+        // so that package providers calling asset() during boot() get the correct scheme.
 
         // Setup the middleware
         $this->setupMiddleware();
+
+        // Configure PDO open flags for SQLite connections (PHP 8.4 compat)
+        $this->configureSqliteOpenFlags();
 
         // Set WAL mode on SQLite connections
         $this->setWalModeOnSqlite();
@@ -146,6 +160,9 @@ class AppServiceProvider extends ServiceProvider
 
         // Configure Filament v4 to preserve v3 behavior
         $this->configureFilamentV3Compatibility();
+
+        // Configure global Filament defaults (reorderable columns, etc.)
+        $this->configureFilamentGlobalDefaults();
 
         // Setup the API
         $this->setupApi();
@@ -164,6 +181,9 @@ class AppServiceProvider extends ServiceProvider
 
         // Persist user locale preference when changed via the language switcher
         $this->registerLocaleListener();
+
+        // Forward failed queue jobs to Discord/Slack when configured
+        $this->registerJobFailedAlertListener();
 
         // Livewire components
         $this->registerLivewireComponents();
@@ -287,13 +307,7 @@ class AppServiceProvider extends ServiceProvider
             return true;
         }
 
-        // Fallback: Check if APP_URL contains https
-        // This ensures backward compatibility when no reverse proxy is used
-        if (Str::contains(config('app.url'), 'https')) {
-            return true;
-        }
-
-        // No HTTPS detected
+        // No HTTPS detected from headers
         return false;
     }
 
@@ -308,6 +322,41 @@ class AppServiceProvider extends ServiceProvider
         });
 
         // Note: Proxy rate limiting is handled by ProxyRateLimitMiddleware for better performance
+
+        // Gate the copilot stream endpoint behind the use_ai_copilot permission.
+        // Runs after all routes are registered so the vendor route exists.
+        $this->app->booted(function () {
+            $route = app('router')->getRoutes()->getByName('filament-copilot.stream');
+            $route?->middleware(EnsureUserCanUseCopilot::class);
+        });
+    }
+
+    /**
+     * Apply the correct PDO open-flag constants for SQLite connections.
+     *
+     * PHP 8.4 moved the SQLite-specific PDO constants from the global PDO class
+     * into the Pdo\Sqlite sub-class. This method detects which set is available
+     * and writes the resolved values into the runtime config so that database.php
+     * can remain a clean, expression-free array.
+     */
+    private function configureSqliteOpenFlags(): void
+    {
+        $openFlagsAttr = defined('Pdo\\Sqlite::ATTR_OPEN_FLAGS')
+            ? constant('Pdo\\Sqlite::ATTR_OPEN_FLAGS')
+            : PDO::SQLITE_ATTR_OPEN_FLAGS;
+
+        $openMode = (defined('Pdo\\Sqlite::OPEN_READWRITE')
+            ? constant('Pdo\\Sqlite::OPEN_READWRITE')
+            : PDO::SQLITE_OPEN_READWRITE)
+            | (defined('Pdo\\Sqlite::OPEN_CREATE')
+                ? constant('Pdo\\Sqlite::OPEN_CREATE')
+                : PDO::SQLITE_OPEN_CREATE);
+
+        foreach (['sqlite', 'jobs'] as $connection) {
+            $options = config("database.connections.{$connection}.options", []);
+            $options[$openFlagsAttr] = $openMode;
+            config(["database.connections.{$connection}.options" => $options]);
+        }
     }
 
     /**
@@ -439,7 +488,9 @@ class AppServiceProvider extends ServiceProvider
                         'url' => rtrim($playlist->xtream_config['url'], '/'),
                     ];
                 }
-                $playlist->uuid = Str::orderedUuid()->toString();
+                if (! $playlist->uuid) {
+                    $playlist->uuid = Str::orderedUuid()->toString();
+                }
 
                 return $playlist;
             });
@@ -932,9 +983,6 @@ class AppServiceProvider extends ServiceProvider
         // Register the backup destination list records component
         Livewire::component('backup-destination-list-records', BackupDestinationListRecords::class);
 
-        // Register the stream player component
-        Livewire::component('stream-player', StreamPlayer::class);
-
         // Register the TMDB search component
         Livewire::component('tmdb-search', TmdbSearch::class);
     }
@@ -959,6 +1007,14 @@ class AppServiceProvider extends ServiceProvider
         Event::listen(
             LocaleChanged::class,
             PersistUserLocale::class,
+        );
+    }
+
+    private function registerJobFailedAlertListener(): void
+    {
+        Event::listen(
+            JobFailed::class,
+            AlertOnJobFailed::class,
         );
     }
 
@@ -995,5 +1051,17 @@ class AppServiceProvider extends ServiceProvider
         // Preserve v3 unique validation behavior (not ignoring record by default)
         Field::configureUsing(fn (Field $field) => $field
             ->uniqueValidationIgnoresRecordByDefault(false));
+    }
+
+    /**
+     * Configure global Filament resource defaults.
+     */
+    private function configureFilamentGlobalDefaults(): void
+    {
+        // Enable reorderable columns on all tables by default
+        Table::configureUsing(fn (Table $table) => $table
+            ->reorderableColumns()
+            ->deferColumnManager(false)
+        );
     }
 }

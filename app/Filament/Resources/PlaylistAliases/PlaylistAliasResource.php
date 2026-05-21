@@ -6,9 +6,14 @@ use App\Facades\PlaylistFacade;
 use App\Filament\Concerns\HasCopilotSupport;
 use App\Filament\Resources\CustomPlaylists\CustomPlaylistResource;
 use App\Filament\Resources\Playlists\PlaylistResource;
+use App\Filament\Tables\SourceCategoriesTable;
+use App\Filament\Tables\SourceGroupsTable;
 use App\Models\CustomPlaylist;
+use App\Models\Group;
 use App\Models\Playlist;
 use App\Models\PlaylistAlias;
+use App\Models\SourceCategory;
+use App\Models\SourceGroup;
 use App\Models\StreamProfile;
 use App\Rules\UrlIsAllowed;
 use App\Services\DateFormatService;
@@ -19,7 +24,9 @@ use Carbon\Carbon;
 use EslamRedaDiv\FilamentCopilot\Contracts\CopilotResource;
 use Exception;
 use Filament\Actions;
+use Filament\Actions\Action;
 use Filament\Forms;
+use Filament\Forms\Components\ModalTableSelect;
 use Filament\Notifications\Notification;
 use Filament\Resources\Resource;
 use Filament\Schemas;
@@ -34,6 +41,7 @@ use Illuminate\Contracts\Support\Htmlable;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Str;
 use Illuminate\Validation\Rule;
 
 class PlaylistAliasResource extends Resource implements CopilotResource
@@ -192,18 +200,18 @@ class PlaylistAliasResource extends Resource implements CopilotResource
             ])
             ->recordActions([
                 Actions\ActionGroup::make([
-                    Actions\Action::make('Download M3U')
+                    Action::make('Download M3U')
                         ->label(__('Download M3U'))
                         ->icon('heroicon-o-arrow-down-tray')
                         ->url(fn ($record) => PlaylistFacade::getUrls($record)['m3u'])
                         ->openUrlInNewTab(),
                     EpgCacheService::getEpgTableAction(),
-                    Actions\Action::make('HDHomeRun URL')
+                    Action::make('HDHomeRun URL')
                         ->label(__('HDHomeRun URL'))
                         ->icon('heroicon-o-arrow-top-right-on-square')
                         ->url(fn ($record) => PlaylistFacade::getUrls($record)['hdhr'])
                         ->openUrlInNewTab(),
-                    Actions\Action::make('Public URL')
+                    Action::make('Public URL')
                         ->label(__('Public URL'))
                         ->icon('heroicon-o-arrow-top-right-on-square')
                         ->url(fn ($record) => '/playlist/v/'.$record->uuid)
@@ -407,7 +415,7 @@ class PlaylistAliasResource extends Resource implements CopilotResource
                         ->helperText(__('The portal/provider timezone (DST-aware). Needed to correctly use timeshift functionality.'))
                         ->placeholder(__('Etc/UTC'))
                         ->hintAction(
-                            Actions\Action::make('get_provider_value')
+                            Action::make('get_provider_value')
                                 ->label(__('Get from playlist status'))
                                 ->icon('heroicon-o-clock')
                                 ->action(action: function ($record, Set $set) {
@@ -445,7 +453,7 @@ class PlaylistAliasResource extends Resource implements CopilotResource
                             Forms\Components\Toggle::make('strict_live_ts')
                                 ->label(__('Enable Strict Live TS Handling'))
                                 ->hintAction(
-                                    Actions\Action::make('learn_more_strict_live_ts')
+                                    Action::make('learn_more_strict_live_ts')
                                         ->label(__('Learn More'))
                                         ->icon('heroicon-o-arrow-top-right-on-square')
                                         ->iconPosition('after')
@@ -459,7 +467,7 @@ class PlaylistAliasResource extends Resource implements CopilotResource
                             Forms\Components\Toggle::make('use_sticky_session')
                                 ->label(__('Enable Sticky Session Handler'))
                                 ->hintAction(
-                                    Actions\Action::make('learn_more_sticky_session')
+                                    Action::make('learn_more_sticky_session')
                                         ->label(__('Learn More'))
                                         ->icon('heroicon-o-arrow-top-right-on-square')
                                         ->iconPosition('after')
@@ -548,11 +556,398 @@ class PlaylistAliasResource extends Resource implements CopilotResource
                         ->label(__('Expiration (date & time)'))
                         ->seconds(false)
                         ->native(false)
+                        ->prefixIcon('heroicon-o-calendar')
                         ->helperText(__('If set, this alias credentials will stop working at that exact time.'))
                         ->nullable()
                         ->columnSpan(2),
                 ]),
+
+            Schemas\Components\Fieldset::make(__('Channel Filter (optional)'))
+                ->columnSpanFull()
+                ->hidden(fn (Get $get): bool => ! $get('playlist_id'))
+                ->schema([
+                    Schemas\Components\Fieldset::make(__('Live channel groups'))
+                        ->schema([
+                            ModalTableSelect::make('group_filter.selected_groups')
+                                ->tableConfiguration(SourceGroupsTable::class)
+                                ->label(__('Allowed live groups'))
+                                ->columnSpanFull()
+                                ->multiple()
+                                ->helperText(__('Only live channels in these groups will be accessible. Leave empty to allow all live groups.'))
+                                ->tableArguments(fn (Get $get): array => [
+                                    'playlist_id' => (int) $get('playlist_id'),
+                                    'type' => 'live',
+                                ])
+                                ->selectAction(
+                                    fn (Action $action) => $action
+                                        ->label(__('Select live groups'))
+                                        ->modalHeading(__('Search live groups'))
+                                        ->modalSubmitActionLabel(__('Confirm selection'))
+                                        ->button(),
+                                )
+                                ->hintAction(
+                                    Action::make('clear_live_groups')
+                                        ->label(__('Clear all'))
+                                        ->icon('heroicon-o-x-mark')
+                                        ->color('danger')
+                                        ->action(function (Set $set): void {
+                                            $set('group_filter.selected_groups', []);
+                                            $set('group_filter.live_group_order', []);
+                                        })
+                                        ->requiresConfirmation()
+                                        ->modalHeading(__('Clear selection'))
+                                        ->modalDescription(__('Are you sure you want to clear all selected live groups?'))
+                                        ->modalSubmitActionLabel(__('Clear'))
+                                )
+                                ->getOptionLabelFromRecordUsing(fn ($record) => $record->display_name ?? $record->name)
+                                ->getOptionLabelsUsing(function (array $values, $record, Get $get): array {
+                                    $playlistId = $record?->playlist_id ?? (int) $get('playlist_id');
+
+                                    return SourceGroup::displayLabelsForIds($playlistId, 'live', $values);
+                                })
+                                ->afterStateHydrated(function ($component, $state, $record): void {
+                                    if (! is_array($state) || empty($state)) {
+                                        return;
+                                    }
+                                    // Stored as names — convert to IDs for the select component
+                                    if (is_string($state[0] ?? null)) {
+                                        $ids = SourceGroup::where('playlist_id', $record?->playlist_id)
+                                            ->where('type', 'live')
+                                            ->whereIn('name', $state)
+                                            ->pluck('id')
+                                            ->unique()
+                                            ->values()
+                                            ->toArray();
+                                        $component->state($ids);
+                                    }
+                                })
+                                ->dehydrateStateUsing(function ($state, $record, Get $get) {
+                                    if (! is_array($state) || empty($state)) {
+                                        return $state;
+                                    }
+                                    $playlistId = $record?->playlist_id ?? (int) $get('playlist_id');
+
+                                    return SourceGroup::where('playlist_id', $playlistId)
+                                        ->where('type', 'live')
+                                        ->whereIn('id', $state)
+                                        ->pluck('name')
+                                        ->unique()
+                                        ->values()
+                                        ->toArray();
+                                })
+                                ->live()
+                                ->afterStateUpdated(function ($state, Get $get, Set $set): void {
+                                    // Keep the custom sort list in sync with the current selection:
+                                    // append newly-selected groups, drop deselected ones, preserve order.
+                                    $playlistId = ((int) $get('playlist_id')) ?: null;
+                                    $selectedNames = self::liveGroupSortSelectedNames(is_array($state) ? $state : [], $playlistId);
+                                    $currentOrder = self::liveGroupSortNames($get('group_filter.live_group_order'));
+                                    $set('group_filter.live_group_order', self::buildLiveGroupSortItems($currentOrder, $selectedNames, $playlistId));
+                                }),
+
+                            Forms\Components\Toggle::make('group_filter.sort_live_groups_custom')
+                                ->label(__('Sort groups in custom order'))
+                                ->helperText(__('When enabled, the selected live groups are delivered to the client in the custom order set below, instead of inheriting the source playlist order.'))
+                                ->default(false)
+                                ->columnSpanFull()
+                                ->live()
+                                ->afterStateUpdated(function ($state, Get $get, Set $set): void {
+                                    if (! $state) {
+                                        return;
+                                    }
+                                    // Seed the order list from the current selection the first time it's enabled.
+                                    if (! empty(self::liveGroupSortNames($get('group_filter.live_group_order')))) {
+                                        return;
+                                    }
+                                    $playlistId = ((int) $get('playlist_id')) ?: null;
+                                    $selectedNames = self::liveGroupSortSelectedNames((array) $get('group_filter.selected_groups'), $playlistId);
+                                    $set('group_filter.live_group_order', self::buildLiveGroupSortItems([], $selectedNames, $playlistId));
+                                }),
+
+                            Forms\Components\Repeater::make('group_filter.live_group_order')
+                                ->hiddenLabel()
+                                ->columnSpanFull()
+                                ->visible(fn (Get $get): bool => (bool) $get('group_filter.sort_live_groups_custom'))
+                                ->dehydrated(true)
+                                ->table([
+                                    Forms\Components\Repeater\TableColumn::make(__('Group Name')),
+                                ])
+                                ->schema([
+                                    Forms\Components\TextInput::make('label')
+                                        ->hiddenLabel()
+                                        ->readOnly()
+                                        ->dehydrated(false),
+                                    Forms\Components\Hidden::make('name'),
+                                ])
+                                ->addable(false)
+                                ->deletable(false)
+                                ->reorderable(true)
+                                ->compact()
+                                ->helperText(__('Drag the groups into the order you want them delivered to the client.'))
+                                ->afterStateHydrated(function (Forms\Components\Repeater $component, $state, $record): void {
+                                    $playlistId = ((int) ($record?->playlist_id ?? 0)) ?: null;
+                                    $orderedNames = self::liveGroupSortNames($state);
+                                    $selectedNames = $record?->group_filter['selected_groups'] ?? [];
+                                    if (! is_array($selectedNames)) {
+                                        $selectedNames = [];
+                                    }
+                                    $component->state(self::buildLiveGroupSortItems($orderedNames, $selectedNames, $playlistId));
+                                })
+                                ->dehydrateStateUsing(fn ($state): array => self::liveGroupSortNames($state)),
+                        ]),
+
+                    Schemas\Components\Fieldset::make(__('VOD groups'))
+                        ->schema([
+                            ModalTableSelect::make('group_filter.selected_vod_groups')
+                                ->tableConfiguration(SourceGroupsTable::class)
+                                ->label(__('Allowed VOD groups'))
+                                ->columnSpanFull()
+                                ->multiple()
+                                ->helperText(__('Only VOD channels in these groups will be accessible. Leave empty to allow all VOD groups.'))
+                                ->tableArguments(fn (Get $get): array => [
+                                    'playlist_id' => (int) $get('playlist_id'),
+                                    'type' => 'vod',
+                                ])
+                                ->selectAction(
+                                    fn (Action $action) => $action
+                                        ->label(__('Select VOD groups'))
+                                        ->modalHeading(__('Search VOD groups'))
+                                        ->modalSubmitActionLabel(__('Confirm selection'))
+                                        ->button(),
+                                )
+                                ->hintAction(
+                                    Action::make('clear_vod_groups')
+                                        ->label(__('Clear all'))
+                                        ->icon('heroicon-o-x-mark')
+                                        ->color('danger')
+                                        ->action(fn (Set $set) => $set('group_filter.selected_vod_groups', []))
+                                        ->requiresConfirmation()
+                                        ->modalHeading(__('Clear selection'))
+                                        ->modalDescription(__('Are you sure you want to clear all selected VOD groups?'))
+                                        ->modalSubmitActionLabel(__('Clear'))
+                                )
+                                ->getOptionLabelFromRecordUsing(fn ($record) => $record->display_name ?? $record->name)
+                                ->getOptionLabelsUsing(function (array $values, $record, Get $get): array {
+                                    $playlistId = $record?->playlist_id ?? (int) $get('playlist_id');
+
+                                    return SourceGroup::displayLabelsForIds($playlistId, 'vod', $values);
+                                })
+                                ->afterStateHydrated(function ($component, $state, $record): void {
+                                    if (! is_array($state) || empty($state)) {
+                                        return;
+                                    }
+                                    if (is_string($state[0] ?? null)) {
+                                        $ids = SourceGroup::where('playlist_id', $record?->playlist_id)
+                                            ->where('type', 'vod')
+                                            ->whereIn('name', $state)
+                                            ->pluck('id')
+                                            ->unique()
+                                            ->values()
+                                            ->toArray();
+                                        $component->state($ids);
+                                    }
+                                })
+                                ->dehydrateStateUsing(function ($state, $record, Get $get) {
+                                    if (! is_array($state) || empty($state)) {
+                                        return $state;
+                                    }
+                                    $playlistId = $record?->playlist_id ?? (int) $get('playlist_id');
+
+                                    return SourceGroup::where('playlist_id', $playlistId)
+                                        ->where('type', 'vod')
+                                        ->whereIn('id', $state)
+                                        ->pluck('name')
+                                        ->unique()
+                                        ->values()
+                                        ->toArray();
+                                }),
+                        ]),
+
+                    Schemas\Components\Fieldset::make(__('Series categories'))
+                        ->schema([
+                            ModalTableSelect::make('group_filter.selected_categories')
+                                ->tableConfiguration(SourceCategoriesTable::class)
+                                ->label(__('Allowed series categories'))
+                                ->columnSpanFull()
+                                ->multiple()
+                                ->helperText(__('Only series in these categories will be accessible. Leave empty to allow all series categories.'))
+                                ->tableArguments(fn (Get $get): array => [
+                                    'playlist_id' => (int) $get('playlist_id'),
+                                ])
+                                ->selectAction(
+                                    fn (Action $action) => $action
+                                        ->label(__('Select series categories'))
+                                        ->modalHeading(__('Search series categories'))
+                                        ->modalSubmitActionLabel(__('Confirm selection'))
+                                        ->button(),
+                                )
+                                ->hintAction(
+                                    Action::make('clear_categories')
+                                        ->label(__('Clear all'))
+                                        ->icon('heroicon-o-x-mark')
+                                        ->color('danger')
+                                        ->action(fn (Set $set) => $set('group_filter.selected_categories', []))
+                                        ->requiresConfirmation()
+                                        ->modalHeading(__('Clear selection'))
+                                        ->modalDescription(__('Are you sure you want to clear all selected series categories?'))
+                                        ->modalSubmitActionLabel(__('Clear'))
+                                )
+                                ->getOptionLabelFromRecordUsing(fn ($record) => $record->name)
+                                ->getOptionLabelsUsing(function (array $values, $record, Get $get): array {
+                                    $playlistId = $record?->playlist_id ?? (int) $get('playlist_id');
+                                    if (! $playlistId) {
+                                        return [];
+                                    }
+                                    $ids = array_filter($values, fn ($v) => is_numeric($v));
+
+                                    return SourceCategory::where('playlist_id', $playlistId)
+                                        ->whereIn('id', $ids)
+                                        ->pluck('name', 'id')
+                                        ->toArray();
+                                })
+                                ->afterStateHydrated(function ($component, $state, $record): void {
+                                    if (! is_array($state) || empty($state)) {
+                                        return;
+                                    }
+                                    if (is_string($state[0] ?? null)) {
+                                        $ids = SourceCategory::where('playlist_id', $record?->playlist_id)
+                                            ->whereIn('name', $state)
+                                            ->pluck('id')
+                                            ->unique()
+                                            ->values()
+                                            ->toArray();
+                                        $component->state($ids);
+                                    }
+                                })
+                                ->dehydrateStateUsing(function ($state, $record, Get $get) {
+                                    if (! is_array($state) || empty($state)) {
+                                        return $state;
+                                    }
+                                    $playlistId = $record?->playlist_id ?? (int) $get('playlist_id');
+
+                                    return SourceCategory::where('playlist_id', $playlistId)
+                                        ->whereIn('id', $state)
+                                        ->pluck('name')
+                                        ->unique()
+                                        ->values()
+                                        ->toArray();
+                                }),
+                        ]),
+                ]),
         ];
+    }
+
+    /**
+     * Extract the ordered internal group names from the custom-sort repeater state.
+     *
+     * Handles both the item shape ([uuid => ['name' => ..., 'label' => ...]]) used
+     * while editing and the flat list of names persisted to the database.
+     *
+     * @return array<string>
+     */
+    public static function liveGroupSortNames(mixed $state): array
+    {
+        if (! is_array($state)) {
+            return [];
+        }
+
+        $names = [];
+        foreach ($state as $item) {
+            if (is_array($item)) {
+                $name = $item['name'] ?? null;
+                if (is_string($name) && $name !== '') {
+                    $names[] = $name;
+                }
+            } elseif (is_string($item) && $item !== '') {
+                $names[] = $item;
+            }
+        }
+
+        return $names;
+    }
+
+    /**
+     * Convert the live group selection state — SourceGroup IDs while editing, or
+     * group names once persisted — into an ordered list of internal group names.
+     *
+     * @return array<string>
+     */
+    public static function liveGroupSortSelectedNames(mixed $selection, ?int $playlistId): array
+    {
+        if (! is_array($selection) || empty($selection)) {
+            return [];
+        }
+
+        $ids = array_values(array_filter($selection, fn ($value): bool => is_numeric($value)));
+        if (! empty($ids) && $playlistId) {
+            $map = SourceGroup::where('playlist_id', $playlistId)
+                ->where('type', 'live')
+                ->whereIn('id', $ids)
+                ->pluck('name', 'id')
+                ->toArray();
+
+            $names = [];
+            foreach ($selection as $id) {
+                if (isset($map[$id])) {
+                    $names[] = $map[$id];
+                }
+            }
+
+            return array_values(array_unique($names));
+        }
+
+        return array_values(array_unique(array_filter(
+            $selection,
+            fn ($value): bool => is_string($value) && $value !== '',
+        )));
+    }
+
+    /**
+     * Reconcile the saved order with the current selection and resolve display
+     * (custom) names, returning repeater items keyed by a generated UUID.
+     *
+     * @param  array<string>  $orderedNames
+     * @param  array<string>  $selectedNames
+     * @return array<string, array{name: string, label: string}>
+     */
+    public static function buildLiveGroupSortItems(array $orderedNames, array $selectedNames, ?int $playlistId): array
+    {
+        $selectedSet = array_flip($selectedNames);
+
+        // Keep previously-ordered groups that are still selected (preserving order)…
+        $kept = array_values(array_filter($orderedNames, fn ($name): bool => isset($selectedSet[$name])));
+        $keptSet = array_flip($kept);
+
+        // …then append any newly-selected groups not already present.
+        $appended = array_values(array_filter($selectedNames, fn ($name): bool => ! isset($keptSet[$name])));
+        $finalNames = array_merge($kept, $appended);
+
+        if (empty($finalNames)) {
+            return [];
+        }
+
+        // Resolve display (custom) names in a single query to avoid N+1. Constrain
+        // to live groups (this pane is live-only) so a VOD group sharing a
+        // name_internal can't supply the label; soft-deleted rows are excluded by
+        // the Group model's SoftDeletes global scope.
+        $labels = [];
+        if ($playlistId) {
+            $labels = Group::where('playlist_id', $playlistId)
+                ->where('type', 'live')
+                ->whereIn('name_internal', $finalNames)
+                ->pluck('name', 'name_internal')
+                ->toArray();
+        }
+
+        $items = [];
+        foreach ($finalNames as $name) {
+            $items[(string) Str::uuid()] = [
+                'name' => $name,
+                'label' => $labels[$name] ?? $name,
+            ];
+        }
+
+        return $items;
     }
 
     /**

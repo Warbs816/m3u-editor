@@ -186,7 +186,9 @@ class GeneralSettings extends Settings
     // VOD NFO file generation
     public ?bool $vod_stream_file_sync_generate_nfo = false;
 
-    // Video player proxy options
+    // Video player options
+    public ?int $max_concurrent_floating_players = null;
+
     public ?bool $force_video_player_proxy = false;
 
     // Resolve m3u-proxy public URL at request time when not explicitly configured
@@ -222,6 +224,8 @@ class GeneralSettings extends Settings
 
     public ?int $tmdb_confidence_threshold = 80;
 
+    public ?bool $tmdb_auto_create_groups = false;
+
     // Network broadcast settings
     public ?int $broadcast_max_concurrent = 10;
 
@@ -251,6 +255,21 @@ class GeneralSettings extends Settings
     public ?array $copilot_global_tools = null;
 
     public ?array $copilot_quick_actions = null;
+
+    // Alerts - Slack / Discord integration
+    public ?bool $discord_alerts_enabled = false;
+
+    public ?string $discord_webhook_url = null;
+
+    public ?bool $slack_alerts_enabled = false;
+
+    public ?string $slack_webhook_url = null;
+
+    /** Forward queued job failures to enabled alert channels */
+    public ?bool $alerts_on_job_failed = false;
+
+    /** Forward playlist import failures to enabled alert channels */
+    public ?bool $alerts_on_import_failed = false;
 
     public static function group(): string
     {

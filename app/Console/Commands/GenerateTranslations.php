@@ -34,7 +34,7 @@ class GenerateTranslations extends Command
     private const SLEEP_US = 200_000; // 200 ms
 
     /** Default locales to generate when --locale is omitted */
-    private const DEFAULT_LOCALES = ['de', 'fr', 'es'];
+    private const DEFAULT_LOCALES = ['de', 'fr', 'es', 'zh_CN'];
 
     /**
      * Brand names / proper nouns that must never be translated.
@@ -145,11 +145,16 @@ class GenerateTranslations extends Command
         foreach ($toTranslate as $dotKey => $value) {
             $bar->setMessage(Str::limit($dotKey, 40));
 
-            if ($this->shouldSkipTranslation((string) $value)) {
+            if (is_array($value)) {
+                // Empty or non-string leaf (e.g. [] placeholder) — keep as-is
+                $translated[$dotKey] = $value;
+            } elseif ($this->shouldSkipTranslation((string) $value)) {
                 $translated[$dotKey] = $value;
             } else {
+                [$protected, $map] = $this->protectPlaceholders((string) $value);
                 try {
-                    $translated[$dotKey] = $translator->translate((string) $value) ?? $value;
+                    $result = $translator->translate($protected) ?? $protected;
+                    $translated[$dotKey] = $this->restorePlaceholders($result, $map);
                 } catch (Throwable $e) {
                     $translated[$dotKey] = $value;
                     $errors++;
@@ -200,8 +205,10 @@ class GenerateTranslations extends Command
             if ($this->shouldSkipTranslation((string) $value)) {
                 $translated[$en] = $value;
             } else {
+                [$protected, $map] = $this->protectPlaceholders((string) $value);
                 try {
-                    $translated[$en] = $translator->translate((string) $value) ?? $value;
+                    $result = $translator->translate($protected) ?? $protected;
+                    $translated[$en] = $this->restorePlaceholders($result, $map);
                 } catch (Throwable $e) {
                     $translated[$en] = $value;
                     $errors++;
@@ -221,7 +228,7 @@ class GenerateTranslations extends Command
 
         ksort($translated);
         $path = lang_path("{$locale}.json");
-        file_put_contents($path, json_encode($translated, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE)."\n");
+        file_put_contents($path, json_encode($translated, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES)."\n");
         $this->line("  <fg=green>Wrote</> lang/{$locale}.json (".count($translated).' keys)');
     }
 
@@ -368,6 +375,43 @@ class GenerateTranslations extends Command
         }
 
         return false;
+    }
+
+    /**
+     * Replace Laravel :placeholder tokens with neutral markers before translation.
+     * Prevents Google Translate from mangling :name, :count, :date, etc.
+     * Returns the protected string and a map of token → original placeholder.
+     *
+     * @return array{0: string, 1: array<string, string>}
+     */
+    private function protectPlaceholders(string $value): array
+    {
+        $map = [];
+        $index = 0;
+
+        $protected = preg_replace_callback('/:[a-zA-Z_][a-zA-Z0-9_]*/', function (array $m) use (&$map, &$index) {
+            $token = "{PH{$index}}";
+            $map[$token] = $m[0];
+            $index++;
+
+            return $token;
+        }, $value);
+
+        return [$protected, $map];
+    }
+
+    /**
+     * Restore :placeholder tokens that were protected before translation.
+     *
+     * @param  array<string, string>  $map
+     */
+    private function restorePlaceholders(string $translated, array $map): string
+    {
+        if (empty($map)) {
+            return $translated;
+        }
+
+        return strtr($translated, $map);
     }
 
     /**

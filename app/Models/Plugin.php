@@ -24,8 +24,11 @@ class Plugin extends Model
         'data_ownership' => 'array',
         'trusted_hashes' => 'array',
         'validation_errors' => 'array',
+        'latest_release_metadata' => 'array',
+        'update_check_enabled' => 'boolean',
         'available' => 'boolean',
         'enabled' => 'boolean',
+        'last_update_check_at' => 'datetime',
         'trusted_at' => 'datetime',
         'blocked_at' => 'datetime',
         'integrity_verified_at' => 'datetime',
@@ -102,10 +105,41 @@ class Plugin extends Model
         return ($this->source_type ?? '') === 'bundled';
     }
 
+    /**
+     * Whether this plugin's repository belongs to a configured trusted org.
+     *
+     * Used for UI decisions only — trust enforcement uses the install review's
+     * source URL via PluginManager::isFromTrustedOrg().
+     */
+    public function isFromOfficialOrg(): bool
+    {
+        if (! $this->repository) {
+            return false;
+        }
+
+        $parts = explode('/', ltrim((string) $this->repository, '/'));
+
+        return count($parts) >= 2
+            && in_array($parts[0], config('plugins.trusted_orgs', []), true);
+    }
+
     public function hasActiveRuns(): bool
     {
         return $this->runs()
             ->where('status', 'running')
             ->exists();
+    }
+
+    public function hasUpdateAvailable(): bool
+    {
+        if (! $this->version || ! $this->latest_version) {
+            return false;
+        }
+
+        return version_compare(
+            ltrim($this->version, 'v'),
+            ltrim($this->latest_version, 'v'),
+            '<',
+        );
     }
 }

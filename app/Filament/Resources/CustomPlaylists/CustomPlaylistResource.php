@@ -13,6 +13,7 @@ use App\Filament\Resources\CustomPlaylists\RelationManagers\ChannelsRelationMana
 use App\Filament\Resources\CustomPlaylists\RelationManagers\GroupsRelationManager;
 use App\Filament\Resources\CustomPlaylists\RelationManagers\SeriesRelationManager;
 use App\Filament\Resources\CustomPlaylists\RelationManagers\VodRelationManager;
+use App\Jobs\DuplicateCustomPlaylist;
 use App\Models\CustomPlaylist;
 use App\Models\PlaylistAuth;
 use App\Models\StreamProfile;
@@ -32,9 +33,11 @@ use Filament\Forms\Components\Repeater;
 use Filament\Forms\Components\Select;
 use Filament\Forms\Components\TextInput;
 use Filament\Forms\Components\Toggle;
+use Filament\Notifications\Notification;
 use Filament\Resources\Resource;
 use Filament\Schemas\Components\Fieldset;
 use Filament\Schemas\Components\Grid;
+use Filament\Schemas\Components\Group as ComponentsGroup;
 use Filament\Schemas\Components\Section;
 use Filament\Schemas\Components\Tabs;
 use Filament\Schemas\Components\Tabs\Tab;
@@ -187,6 +190,30 @@ class CustomPlaylistResource extends Resource implements CopilotResource
                         ->icon('heroicon-o-arrow-top-right-on-square')
                         ->url(fn ($record) => '/playlist/v/'.$record->uuid)
                         ->openUrlInNewTab(),
+                    Action::make('Duplicate')
+                        ->label(__('Duplicate'))
+                        ->schema([
+                            TextInput::make('name')
+                                ->label(__('Playlist name'))
+                                ->required()
+                                ->helperText(__('This will be the name of the duplicated playlist.')),
+                        ])
+                        ->action(function ($record, $data) {
+                            app('Illuminate\Contracts\Bus\Dispatcher')
+                                ->dispatch(new DuplicateCustomPlaylist($record, $data['name']));
+                        })->after(function () {
+                            Notification::make()
+                                ->success()
+                                ->title(__('Custom playlist is being duplicated'))
+                                ->body(__('The custom playlist is being duplicated in the background. You will be notified on completion.'))
+                                ->duration(3000)
+                                ->send();
+                        })
+                        ->requiresConfirmation()
+                        ->icon('heroicon-o-document-duplicate')
+                        ->modalIcon('heroicon-o-document-duplicate')
+                        ->modalDescription(__('Duplicate custom playlist now?'))
+                        ->modalSubmitActionLabel(__('Yes, duplicate now')),
                     DeleteAction::make(),
                 ])->button()->hiddenLabel()->size('sm'),
                 EditAction::make()
@@ -282,13 +309,35 @@ class CustomPlaylistResource extends Resource implements CopilotResource
                 ->collapsed($creating)
                 ->columns(2)
                 ->schema([
-                    Toggle::make('auto_channel_increment')
-                        ->label(__('Auto channel number increment'))
-                        ->columnSpan(1)
-                        ->inline(false)
-                        ->live()
-                        ->default(false)
-                        ->helperText(__('If no channel number is set, output an automatically incrementing number.')),
+                    ComponentsGroup::make()
+                        ->columnSpanFull()
+                        ->columns(2)
+                        ->schema([
+                            Toggle::make('disable_m3u_xtream_format')
+                                ->label(__('Disable Xtream URL format in M3U output'))
+                                ->columnSpan(1)
+                                ->inline(false)
+                                ->default(false)
+                                ->hintIcon(
+                                    'heroicon-m-question-mark-circle',
+                                    tooltip: 'When enabled, the provider\'s original stream URL will be used directly in M3U output instead of the internal Xtream-format URL.'
+                                )
+                                ->afterStateHydrated(function (Toggle $component) {
+                                    if (config('app.disable_m3u_xtream_format', false)) {
+                                        $component->state(true);
+                                    }
+                                })
+                                ->dehydrated(fn (): bool => ! config('app.disable_m3u_xtream_format', false))
+                                ->disabled(fn (): bool => config('app.disable_m3u_xtream_format', false))
+                                ->helperText(config('app.disable_m3u_xtream_format', false) ? 'Already set by environment variable!' : __('Output the provider URL directly in M3U instead of routing through the internal Xtream URL format.')),
+                            Toggle::make('auto_channel_increment')
+                                ->label(__('Auto channel number increment'))
+                                ->columnSpan(1)
+                                ->inline(false)
+                                ->live()
+                                ->default(false)
+                                ->helperText(__('If no channel number is set, output an automatically incrementing number.')),
+                        ]),
                     TextInput::make('channel_start')
                         ->helperText(__('The starting channel number.'))
                         ->columnSpan(1)
@@ -296,6 +345,29 @@ class CustomPlaylistResource extends Resource implements CopilotResource
                         ->type('number')
                         ->hidden(fn (Get $get): bool => ! $get('auto_channel_increment'))
                         ->required(),
+                    Grid::make()
+                        ->columns(2)
+                        ->columnSpanFull()
+                        ->schema([
+                            Toggle::make('include_series_in_m3u')
+                                ->label(__('Include series in M3U output'))
+                                ->inline(false)
+                                ->hintIcon(
+                                    'heroicon-m-question-mark-circle',
+                                    tooltip: 'Enable this to output your enabled series in the M3U file. It is recommended to enable the "Fetch metadata" option when enabled, otherwise you will need to manually fetch metadata for each series.'
+                                )
+                                ->default(false)
+                                ->helperText(__('When enabled, series will be included in the M3U output. It is recommended to enable the "Fetch metadata" option when enabled.')),
+                            Toggle::make('include_vod_in_m3u')
+                                ->label(__('Include VOD in M3U output'))
+                                ->inline(false)
+                                ->hintIcon(
+                                    'heroicon-m-question-mark-circle',
+                                    tooltip: 'Enable this to output your enabled VOD channels in the M3U file.'
+                                )
+                                ->default(false)
+                                ->helperText(__('When enabled, VOD channels will be included in the M3U output.')),
+                        ]),
                 ]),
             Section::make(__('EPG Output'))
                 ->description(__('EPG output options'))

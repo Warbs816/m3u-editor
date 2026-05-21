@@ -10,6 +10,13 @@ return [
 
     'install_mode' => env('PLUGIN_INSTALL_MODE', 'normal'),
 
+    /**
+     * Automatically trust and enable installs from trusted orgs (see trusted_orgs below)
+     * without requiring a separate manual Trust step. Set to false to enforce manual trust
+     * for every install, even from official sources.
+     */
+    'auto_trust_official' => (bool) env('PLUGIN_AUTO_TRUST_OFFICIAL', true),
+
     'run_retention_days' => (int) env('PLUGIN_RUN_RETENTION_DAYS', 7),
 
     'directories' => [
@@ -24,6 +31,36 @@ return [
         'trim',
         explode(',', (string) env('PLUGIN_DEV_DIRECTORIES', ''))
     ))),
+
+    /**
+     * Trusted GitHub organisations. Plugins whose plugin.json "repository"
+     * field resolves to one of these orgs are auto-trusted without a manual
+     * install review — equivalent to bundled plugins.
+     */
+    'trusted_orgs' => ['m3ue'],
+
+    /**
+     * Official plugin stubs: known plugins maintained by a trusted org.
+     * The plugins:sync-official command seeds these as stub Plugin records
+     * so users can browse and install them from the UI.
+     */
+    'official_plugins' => [
+        'tv-logos' => [
+            'repository' => 'm3ue/tv-logos-plugin',
+            'name' => 'TV Logos',
+            'description' => 'Automatically enriches channel logos from the open-source tv-logo/tv-logos repository via the jsDelivr CDN.',
+        ],
+        'channels-dvr' => [
+            'repository' => 'm3ue/channels-dvr-plugin',
+            'name' => 'Channels DVR',
+            'description' => 'Maps Gracenote station IDs from a local Channels DVR install to your playlist channels via the DVR guide stations API.',
+        ],
+        'youtubearr' => [
+            'repository' => 'm3ue/youtubearr-plugin',
+            'name' => 'YouTubearr',
+            'description' => 'Monitors YouTube channels for active livestreams and automatically creates or removes custom channels. Zero API quota — uses yt-dlp.',
+        ],
+    ],
 
     'staging_directory' => storage_path('app/plugin-staging'),
 
@@ -49,6 +86,7 @@ return [
 
     'source_types' => [
         'bundled',
+        'official',
         'local_directory',
         'staged_archive',
         'github_release',
@@ -91,6 +129,12 @@ return [
     'github' => [
         'download_timeout' => (int) env('PLUGIN_GITHUB_DOWNLOAD_TIMEOUT', 60),
         'allowed_hosts' => ['github.com'],
+    ],
+
+    'update_check' => [
+        'enabled' => (bool) env('PLUGIN_UPDATE_CHECK_ENABLED', true),
+        'frequency_hours' => (int) env('PLUGIN_UPDATE_CHECK_FREQUENCY', 4),
+        'github_token' => env('PLUGIN_GITHUB_TOKEN'),
     ],
 
     'archive_limits' => [
@@ -145,10 +189,12 @@ return [
     ],
 
     'field_types' => [
+        'section',
         'boolean',
         'number',
         'text',
         'textarea',
+        'tags',
         'select',
         'model_select',
     ],

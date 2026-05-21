@@ -17,6 +17,9 @@ function streamPlayer() {
         },
         availableAudioTracks: [],
         selectedAudioTrack: null,
+        fragmentErrorCount: 0,
+        _videoHandlers: {},
+        _cleaned: false,
 
         // ── Watch Progress ────────────────────────────────────────────────
         progressConfig: null,   // { contentType, streamId, playlistId, seriesId, seasonNumber }
@@ -182,7 +185,6 @@ function streamPlayer() {
                 return
             }
 
-            console.log('initPlayer called with:', { url, format, playerId });
             const video = document.getElementById(playerId);
             const loadingEl = document.getElementById(playerId + '-loading');
             const errorEl = document.getElementById(playerId + '-error');
@@ -195,6 +197,7 @@ function streamPlayer() {
 
             // Clean up any existing players before binding the new video element
             this.cleanup();
+            this._cleaned = false;
 
             // Store reference to video element for cleanup
             this.player = video;
@@ -209,9 +212,9 @@ function streamPlayer() {
             this._initProgress();
 
             // Update status
-            !!statusEl && (statusEl.textContent = 'Connecting...');
-            !!loadingEl && (loadingEl.style.display = 'flex');
-            !!errorEl && (errorEl.style.display = 'none');
+            if (statusEl) statusEl.textContent = 'Connecting...';
+            if (loadingEl) loadingEl.style.display = 'flex';
+            if (errorEl) errorEl.style.display = 'none';
             try {
                 // Use the explicit format parameter as authoritative. Only fall back to
                 // URL sniffing when no format is provided — the URL extension is an
@@ -220,13 +223,10 @@ function streamPlayer() {
                 const effectiveFormat = format || (url.includes('.m3u8') ? 'm3u8' : '');
 
                 if (effectiveFormat === 'hls' || effectiveFormat === 'm3u8') {
-                    console.log('Initializing HLS player');
                     this.initHlsPlayer(video, url, playerId);
                 } else if (effectiveFormat === 'ts' || effectiveFormat === 'mpegts') {
-                    console.log('Initializing MPEG-TS player');
                     this.initMpegTsPlayer(video, url, playerId);
                 } else {
-                    console.log('Initializing native player');
                     this.initNativePlayer(video, url, playerId);
                 }
                 // Attach to AirPlay manager for device detection (all stream types)
@@ -266,7 +266,6 @@ function streamPlayer() {
             }
 
             if (typeof Hls !== 'undefined' && Hls.isSupported()) {
-                console.log('Creating HLS player with configuration...', { contentType, isLive });
                 this.hls = new Hls({
                     enableWorker: true,
                     lowLatencyMode: isLive,
@@ -291,7 +290,6 @@ function streamPlayer() {
                     fragLoadingMaxRetry: 6,
                     fragLoadingRetryDelay: isLive ? 1000 : 1500,
                     xhrSetup: function (xhr, url) {
-                        console.log('HLS XHR setup for:', url);
                         xhr.withCredentials = false;
                     }
                 });
@@ -301,8 +299,6 @@ function streamPlayer() {
                 this.hls.attachMedia(video);
 
                 this.hls.on(Hls.Events.MANIFEST_PARSED, () => {
-                    console.log('HLS manifest parsed successfully');
-
                     // Collect HLS metadata
                     if (this.hls.levels && this.hls.levels.length > 0) {
                         const level = this.hls.levels[this.hls.currentLevel] || this.hls.levels[0];
@@ -338,15 +334,12 @@ function streamPlayer() {
                 });
 
                 this.hls.on(Hls.Events.ERROR, (event, data) => {
-                    console.error('HLS Error:', data);
-
                     // Check for authentication/authorization errors (403, 401)
                     const isAuthError = data.response && (data.response.code === 403 || data.response.code === 401);
                     const isFragLoadError = data.details && data.details.includes('FRAG_LOAD_ERROR');
 
                     // If we get auth errors on fragment loading, immediately fall back to native
                     if (isAuthError && isFragLoadError) {
-                        console.log('HLS Authentication error on fragments, falling back to native player immediately');
                         this.cleanup();
                         this.initNativePlayer(video, url, playerId);
                         return;
@@ -354,32 +347,25 @@ function streamPlayer() {
 
                     // Handle different types of errors
                     if (data.fatal) {
-                        console.log('Fatal HLS error, attempting recovery or fallback');
                         switch (data.type) {
                             case Hls.ErrorTypes.NETWORK_ERROR:
-                                console.log('HLS Network error, trying to recover...');
                                 this.hls.startLoad();
                                 break;
                             case Hls.ErrorTypes.MEDIA_ERROR:
-                                console.log('HLS Media error, trying to recover...');
                                 this.hls.recoverMediaError();
                                 break;
                             default:
-                                console.log('HLS Unrecoverable error, falling back to native player');
                                 this.cleanup();
                                 this.initNativePlayer(video, url, playerId);
                                 break;
                         }
                     } else {
-                        console.warn('Non-fatal HLS error:', data.details);
                         // For segment loading errors, let's show the specific error
                         if (data.details && data.details.includes('FRAG_LOAD_ERROR')) {
                             // If we've had multiple fragment errors, fall back
-                            if (!this.fragmentErrorCount) this.fragmentErrorCount = 0;
                             this.fragmentErrorCount++;
 
                             if (this.fragmentErrorCount >= 3) {
-                                console.log('Multiple fragment errors, falling back to native player');
                                 this.cleanup();
                                 this.initNativePlayer(video, url, playerId);
                                 return;
@@ -390,20 +376,7 @@ function streamPlayer() {
                     }
                 });
 
-                // Add more event listeners for debugging
-                this.hls.on(Hls.Events.FRAG_LOAD_ERROR, (event, data) => {
-                    console.error('HLS Fragment load error:', data);
-                    console.error('Failed URL:', data.frag?.url);
-                    console.error('Response:', data.response);
-                });
-
-                this.hls.on(Hls.Events.LEVEL_LOADED, (event, data) => {
-                    console.log('HLS Level loaded:', data.level, 'URL:', data.details?.url);
-                });
-
                 this.hls.on(Hls.Events.LEVEL_SWITCHED, (event, data) => {
-                    console.log('HLS Level switched to:', data.level);
-
                     // Update metadata when level changes
                     if (this.hls.levels && this.hls.levels[data.level]) {
                         const level = this.hls.levels[data.level];
@@ -415,7 +388,6 @@ function streamPlayer() {
                 });
 
             } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
-                console.log('Using Safari native HLS support');
                 this.streamMetadata.format = 'HLS (Native)';
                 video.src = url;
                 this.setupNativeEvents(video, playerId);
@@ -425,7 +397,6 @@ function streamPlayer() {
         },
 
         initMpegTsPlayer(video, url, playerId) {
-            console.log('MPEG-TS libraries available:', typeof mpegts !== 'undefined', mpegts?.getFeatureList().mseLivePlayback);
 
             const contentType = video.dataset.contentType || '';
             const isLive = contentType === 'live';
@@ -440,19 +411,22 @@ function streamPlayer() {
             this.updateStreamDetails(playerId);
 
             if (typeof mpegts !== 'undefined' && mpegts.getFeatureList().mseLivePlayback) {
-                console.log('Creating MPEG-TS player...', { contentType, isLive });
                 this.mpegts = mpegts.createPlayer({
                     type: 'mpegts',
                     url: url,
                     isLive,
                     enableWorker: true,
                     enableStashBuffer: isLive,
-                    liveBufferLatencyChasing: isLive,
-                    liveSync: isLive,
+                    // Latency chasing triggers seek() → flushSourceBuffer() →
+                    // removeSourceBuffer() while _pump microtasks are still in
+                    // flight, causing InvalidStateError on SourceBuffer access.
+                    // A floating player doesn't need sub-second live latency.
+                    liveBufferLatencyChasing: false,
+                    liveSync: false,
                     cors: true,
                     autoCleanupSourceBuffer: true,
-                    autoCleanupMaxBackwardDuration: isLive ? 10 : 30,
-                    autoCleanupMinBackwardDuration: isLive ? 5 : 15,
+                    autoCleanupMaxBackwardDuration: isLive ? 30 : 60,
+                    autoCleanupMinBackwardDuration: isLive ? 15 : 30,
                     reuseRedirectedURL: true,
                 });
 
@@ -508,7 +482,6 @@ function streamPlayer() {
                 });
 
                 this.mpegts.on(mpegts.Events.ERROR, (type, details, info) => {
-                    console.error('MPEGTS Error:', type, details, info);
                     this.showError(playerId, `MPEGTS Error: ${details || 'Unknown error'}`);
                 });
 
@@ -516,15 +489,12 @@ function streamPlayer() {
                 this.setupNativeEvents(video, playerId);
 
             } else {
-                console.log('MPEG-TS not supported, falling back to native');
                 // Fallback to native
                 this.initNativePlayer(video, url, playerId);
             }
         },
 
         initNativePlayer(video, url, playerId) {
-            console.log('Initializing native player for:', playerId);
-
             // Set stream format
             this.streamMetadata.format = 'Native';
 
@@ -539,79 +509,72 @@ function streamPlayer() {
         },
 
         setupNativeEvents(video, playerId) {
-            video.addEventListener('loadstart', () => {
-                this.updateStatus(playerId, 'Loading...');
-            });
+            // Remove any previously attached handlers to prevent listener stacking
+            this._removeVideoHandlers(video);
 
-            video.addEventListener('loadedmetadata', () => {
-                // Collect basic metadata
-                if (video.videoWidth && video.videoHeight) {
-                    this.streamMetadata.resolution = `${video.videoWidth}x${video.videoHeight}`;
-                }
-
-                this.collectVideoMetadata(video, playerId);
-                this.hideLoading(playerId);
-                this.updateStatus(playerId, 'Ready');
-                this.updateStreamDetails(playerId);
-            });
-
-            video.addEventListener('loadeddata', () => {
-                this.collectVideoMetadata(video, playerId);
-            });
-
-            video.addEventListener('canplay', () => {
-                this.updateStatus(playerId, 'Ready');
-                this.collectVideoMetadata(video, playerId);
-            });
-
-            video.addEventListener('playing', () => {
-                this.updateStatus(playerId, 'Playing');
-                this._startProgressTimer();
-
-                // Try to collect additional metadata once playing
-                setTimeout(() => {
-                    this.collectVideoMetadata(video, playerId);
-                }, 1000); // Give it a second to establish the stream
-            });
-
-            video.addEventListener('pause', () => {
-                this._saveProgress(true);
-            });
-
-            video.addEventListener('ended', () => {
-                this._saveProgress(true);
-            });
-
-            video.addEventListener('progress', () => {
-                // Try to collect metadata as data loads
-                if (video.buffered.length > 0 && !this.streamMetadata.codec) {
-                    this.collectVideoMetadata(video, playerId);
-                }
-            });
-
-            video.addEventListener('error', (e) => {
-                if (video.error.code === video.error.MEDIA_ELEMENT_ERROR) {
-                    return; // Ignore MEDIA_ELEMENT_ERROR which can happen on cleanup
-                }
-                let errorMessage = 'Playback failed';
-                if (video.error) {
-                    switch (video.error.code) {
-                        case video.error.MEDIA_ERR_ABORTED:
-                            errorMessage = 'Playback aborted';
-                            break;
-                        case video.error.MEDIA_ERR_NETWORK:
-                            errorMessage = 'Network error';
-                            break;
-                        case video.error.MEDIA_ERR_DECODE:
-                            errorMessage = 'Decode error';
-                            break;
-                        case video.error.MEDIA_ERR_SRC_NOT_SUPPORTED:
-                            errorMessage = 'Format not supported';
-                            break;
+            this._videoHandlers = {
+                loadstart: () => {
+                    this.updateStatus(playerId, 'Loading...');
+                },
+                loadedmetadata: () => {
+                    if (video.videoWidth && video.videoHeight) {
+                        this.streamMetadata.resolution = `${video.videoWidth}x${video.videoHeight}`;
                     }
-                }
-                this.showError(playerId, errorMessage);
-            });
+                    this.collectVideoMetadata(video, playerId);
+                    this.hideLoading(playerId);
+                    this.updateStatus(playerId, 'Ready');
+                    this.updateStreamDetails(playerId);
+                },
+                loadeddata: () => {
+                    this.collectVideoMetadata(video, playerId);
+                },
+                canplay: () => {
+                    this.updateStatus(playerId, 'Ready');
+                    this.collectVideoMetadata(video, playerId);
+                },
+                playing: () => {
+                    this.updateStatus(playerId, 'Playing');
+                    this._startProgressTimer();
+                    setTimeout(() => {
+                        this.collectVideoMetadata(video, playerId);
+                    }, 1000);
+                },
+                pause: () => {
+                    this._saveProgress(true);
+                },
+                ended: () => {
+                    this._saveProgress(true);
+                },
+                progress: () => {
+                    if (video.buffered.length > 0 && !this.streamMetadata.codec) {
+                        this.collectVideoMetadata(video, playerId);
+                    }
+                },
+                error: () => {
+                    if (!video.error || video.error.code === video.error.MEDIA_ERR_ABORTED) {
+                        return;
+                    }
+                    const errorMessages = {
+                        [video.error.MEDIA_ERR_NETWORK]: 'Network error',
+                        [video.error.MEDIA_ERR_DECODE]: 'Decode error',
+                        [video.error.MEDIA_ERR_SRC_NOT_SUPPORTED]: 'Format not supported',
+                    };
+                    const errorMessage = errorMessages[video.error.code] ?? 'Playback failed';
+                    this.showError(playerId, errorMessage);
+                },
+            };
+
+            for (const [event, handler] of Object.entries(this._videoHandlers)) {
+                video.addEventListener(event, handler);
+            }
+        },
+
+        _removeVideoHandlers(video) {
+            if (!video) return;
+            for (const [event, handler] of Object.entries(this._videoHandlers)) {
+                video.removeEventListener(event, handler);
+            }
+            this._videoHandlers = {};
         },
 
         hideLoading(playerId) {
@@ -675,48 +638,64 @@ function streamPlayer() {
             const detailsEl = document.getElementById(playerId + '-details');
             if (!detailsEl) return;
 
-            let detailsHtml = '';
+            // Build detail rows safely using textContent (no innerHTML) to
+            // prevent XSS from malicious stream metadata values.
+            const rows = [];
 
-            // Stream Format (always show first)
             if (this.streamMetadata.format) {
-                detailsHtml += `<div class="flex justify-between gap-1"><span>Stream Format:</span><span class="font-mono font-semibold text-blue-400">${this.streamMetadata.format}</span></div>`;
+                rows.push({ label: 'Stream Format:', value: this.streamMetadata.format, highlight: true });
             }
-
             if (this.streamMetadata.resolution) {
-                detailsHtml += `<div class="flex justify-between gap-1"><span>Resolution:</span><span class="font-mono">${this.streamMetadata.resolution}</span></div>`;
+                rows.push({ label: 'Resolution:', value: this.streamMetadata.resolution });
             }
             if (this.streamMetadata.codec) {
-                detailsHtml += `<div class="flex justify-between gap-1"><span>Video Codec:</span><span class="font-mono">${this.streamMetadata.codec}</span></div>`;
+                rows.push({ label: 'Video Codec:', value: this.streamMetadata.codec });
             }
             if (this.streamMetadata.audioCodec) {
-                detailsHtml += `<div class="flex justify-between gap-1"><span>Audio Codec:</span><span class="font-mono">${this.streamMetadata.audioCodec}</span></div>`;
+                rows.push({ label: 'Audio Codec:', value: this.streamMetadata.audioCodec });
             }
             if (this.streamMetadata.audioChannels) {
-                detailsHtml += `<div class="flex justify-between gap-1"><span>Audio Channels:</span><span class="font-mono">${this.streamMetadata.audioChannels}</span></div>`;
+                rows.push({ label: 'Audio Channels:', value: this.streamMetadata.audioChannels });
             }
             if (this.streamMetadata.bitrate) {
-                const bitrateKbps = Math.round(this.streamMetadata.bitrate / 1000);
-                detailsHtml += `<div class="flex justify-between gap-1"><span>Bitrate:</span><span class="font-mono">${bitrateKbps} kbps</span></div>`;
+                rows.push({ label: 'Bitrate:', value: Math.round(this.streamMetadata.bitrate / 1000) + ' kbps' });
             }
             if (this.streamMetadata.framerate) {
-                detailsHtml += `<div class="flex justify-between gap-1"><span>Frame Rate:</span><span class="font-mono">${this.streamMetadata.framerate} fps</span></div>`;
+                rows.push({ label: 'Frame Rate:', value: this.streamMetadata.framerate + ' fps' });
             }
             if (this.streamMetadata.profile) {
-                detailsHtml += `<div class="flex justify-between gap-1"><span>Profile:</span><span class="font-mono">${this.streamMetadata.profile}</span></div>`;
+                rows.push({ label: 'Profile:', value: this.streamMetadata.profile });
             }
 
-            if (detailsHtml) {
-                detailsEl.innerHTML = detailsHtml;
-                detailsEl.style.display = 'block';
+            detailsEl.textContent = '';
+
+            if (rows.length === 0) {
+                const empty = document.createElement('div');
+                empty.className = 'text-gray-500 dark:text-gray-400 text-sm';
+                empty.textContent = 'Stream details not available';
+                detailsEl.appendChild(empty);
             } else {
-                detailsEl.innerHTML = '<div class="text-gray-500 dark:text-gray-400 text-sm">Stream details not available</div>';
-                detailsEl.style.display = 'block';
+                for (const row of rows) {
+                    const div = document.createElement('div');
+                    div.className = 'flex justify-between gap-1';
+
+                    const label = document.createElement('span');
+                    label.textContent = row.label;
+
+                    const value = document.createElement('span');
+                    value.className = row.highlight ? 'font-mono font-semibold text-blue-400' : 'font-mono';
+                    value.textContent = row.value;
+
+                    div.appendChild(label);
+                    div.appendChild(value);
+                    detailsEl.appendChild(div);
+                }
             }
+
+            detailsEl.style.display = 'block';
         },
 
         collectVideoMetadata(video, playerId) {
-            console.log('Collecting video metadata for:', playerId);
-
             // Get basic video properties
             if (video.videoWidth && video.videoHeight) {
                 this.streamMetadata.resolution = `${video.videoWidth}x${video.videoHeight}`;
@@ -770,25 +749,14 @@ function streamPlayer() {
         },
 
         detectAudioTracks(video, playerId) {
-            console.log('Detecting audio tracks for:', playerId);
-
             // Reset audio tracks
             this.availableAudioTracks = [];
             this.selectedAudioTrack = null;
 
             // Try to get real audio tracks first
             if (video.audioTracks && video.audioTracks.length > 0) {
-                console.log('Found real audio tracks:', video.audioTracks.length);
-
                 for (let i = 0; i < video.audioTracks.length; i++) {
                     const track = video.audioTracks[i];
-                    console.log(`Audio track ${i}:`, {
-                        id: track.id,
-                        kind: track.kind,
-                        label: track.label,
-                        language: track.language,
-                        enabled: track.enabled
-                    });
 
                     this.availableAudioTracks.push({
                         index: i,
@@ -811,8 +779,6 @@ function streamPlayer() {
                         }
                     }
                 }
-            } else {
-                console.log('No real audio tracks found');
             }
 
             // Default audio channels if we have tracks but no channels
@@ -826,7 +792,6 @@ function streamPlayer() {
             if (!videoSrc) return;
 
             const extension = videoSrc.split('.').pop().toLowerCase().split('?')[0];
-            console.log('Detecting codec from container extension:', extension);
 
             switch (extension) {
                 case 'mkv':
@@ -869,7 +834,8 @@ function streamPlayer() {
         },
 
         cleanup() {
-            console.log('Cleaning up stream player...');
+            if (this._cleaned) return;
+            this._cleaned = true;
 
             // Save final progress and stop timer
             this._saveProgress(true);
@@ -904,8 +870,17 @@ function streamPlayer() {
                 Alpine.store('airplay').detachFromVideo();
             }
 
+            // Track whether an MSE-based library was managing this element.
+            // Both HLS.js and mpegts.js use a MediaSource object URL as the
+            // video src and manage SourceBuffer lifecycle internally. Calling
+            // video.load() after destroy() immediately closes the MediaSource
+            // and removes all SourceBuffers while the library's queued async
+            // operations are still in flight, causing InvalidStateError when
+            // they try to read sourceBuffer.buffered (e.g. _needCleanupSourceBuffer).
+            const wasHls = !!this.hls;
+            const wasMpegts = !!this.mpegts;
+
             if (this.hls) {
-                console.log('Destroying HLS player');
                 try {
                     this.hls.destroy();
                 } catch (error) {
@@ -915,7 +890,6 @@ function streamPlayer() {
             }
 
             if (this.mpegts) {
-                console.log('Destroying MPEG-TS player');
                 try {
                     this.mpegts.destroy();
                 } catch (error) {
@@ -924,13 +898,22 @@ function streamPlayer() {
                 this.mpegts = null;
             }
 
-            // Also pause and clear any video element that might be playing
+            // Remove video event listeners before clearing the element
+            this._removeVideoHandlers(this.player);
+
+            // Pause and clear any video element that might be playing.
             if (this.player && this.player.tagName === 'VIDEO') {
-                console.log('Stopping video playback');
                 try {
                     this.player.pause();
                     this.player.removeAttribute('src');
-                    this.player.load(); // This will stop any ongoing loading/streaming
+                    // Skip video.load() when an MSE-based library (HLS.js or
+                    // mpegts.js) was active. Their destroy() methods handle MSE
+                    // teardown internally. Calling load() here races with their
+                    // queued async operations and causes InvalidStateError on
+                    // SourceBuffer access (e.g. _needCleanupSourceBuffer).
+                    if (!wasHls && !wasMpegts) {
+                        this.player.load();
+                    }
                     this.player._streamPlayer = null;
                 } catch (error) {
                     console.warn('Error cleaning up video element:', error);
@@ -942,17 +925,27 @@ function streamPlayer() {
     };
 }
 
-// Global retry function
+// Global retry function — works across floating, pop-out, and modal players
 function retryStream(playerId) {
-    const component = document.querySelector(`#${playerId}`).closest('[wire\\:id]');
-    if (component) {
-        // Re-trigger the player initialization
-        const alpineData = Alpine.$data(document.getElementById(playerId));
-        if (alpineData && typeof alpineData.initPlayer === 'function') {
-            const url = document.getElementById(playerId).getAttribute('data-url');
-            const format = document.getElementById(playerId).getAttribute('data-format');
-            alpineData.initPlayer(url, format, playerId);
-        }
+    const video = document.getElementById(playerId);
+    if (!video) return;
+
+    // data-url (pop-out / modal) or data-stream-url (floating player)
+    const url = video.dataset.url || video.dataset.streamUrl || '';
+    const format = video.dataset.format || video.dataset.streamFormat || '';
+
+    if (!url) return;
+
+    // Prefer the _streamPlayer reference that initPlayer() attaches to every video element
+    if (video._streamPlayer && typeof video._streamPlayer.initPlayer === 'function') {
+        video._streamPlayer.initPlayer(url, format, playerId);
+        return;
+    }
+
+    // Fallback: create a fresh streamPlayer instance
+    if (window.streamPlayer) {
+        const player = window.streamPlayer();
+        player.initPlayer(url, format, playerId);
     }
 }
 
@@ -972,3 +965,34 @@ window.retryStream = retryStream;
 
 // Make toggleStreamDetails function globally accessible
 window.toggleStreamDetails = toggleStreamDetails;
+
+/**
+ * Notify the proxy server to stop a player stream (best-effort via sendBeacon).
+ * Shared by the floating player manager and the pop-out player.
+ *
+ * @param {string|number} id       - The stream/channel ID
+ * @param {string}        type     - 'channel' or 'episode'
+ * @param {string}        clientId - The unique client ID assigned to this player instance
+ */
+function notifyProxyStreamStop(id, type, clientId) {
+    if (!id || !type) {
+        return;
+    }
+    try {
+        const payload = { id, type };
+        if (clientId) {
+            payload.client_id = clientId;
+        }
+        const data = new Blob(
+            [JSON.stringify(payload)],
+            { type: 'application/json' }
+        );
+        navigator.sendBeacon('/api/m3u-proxy/player-stream/stop', data);
+    } catch (e) {
+        // Best-effort: proxy will detect TCP drop as fallback
+        console.warn('Failed to notify server of stream stop:', e);
+    }
+}
+
+// Make notifyProxyStreamStop globally accessible
+window.notifyProxyStreamStop = notifyProxyStreamStop;

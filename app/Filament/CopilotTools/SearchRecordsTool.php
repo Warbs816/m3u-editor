@@ -19,8 +19,8 @@ class SearchRecordsTool extends AbstractResourceTool
     public function schema(JsonSchema $schema): array
     {
         return [
-            'query' => $schema->string()->description('The search term to look for')->required(),
-            'limit' => $schema->integer()->description('Maximum results to return (default: 10, max: 50)'),
+            'query' => $schema->string()->description(__('The search term to look for'))->required(),
+            'limit' => $schema->integer()->description(__('Maximum results to return (default: 10, max: 50)')),
         ];
     }
 
@@ -29,10 +29,9 @@ class SearchRecordsTool extends AbstractResourceTool
         $query = (string) $request['query'];
         $limit = min(50, max(1, (int) ($request['limit'] ?? 10)));
 
-        $model = $this->getModelClass();
         $searchColumns = $this->searchableAttributes();
 
-        $q = $model::query()->where(function ($q) use ($searchColumns, $query) {
+        $q = $this->getBaseQuery()->where(function ($q) use ($searchColumns, $query) {
             foreach ($searchColumns as $col) {
                 $q->orWhere($col, 'LIKE', "%{$query}%");
             }

@@ -3,6 +3,7 @@
 namespace App\Jobs;
 
 use App\Models\Channel;
+use App\Models\Group;
 use App\Models\Job;
 use App\Models\Playlist;
 use Illuminate\Contracts\Queue\ShouldQueue;
@@ -49,6 +50,11 @@ class ProcessM3uVodImportChunk implements ShouldQueue
             // Add the channel for insert/update
             $groupId = $job->variables['groupId'];
             $groupName = $job->variables['groupName'];
+            // Inherit the group's stream_profile_id for new channels; existing assignments
+            // are preserved because stream_profile_id is excluded from the upsert update list.
+            $groupProfileId = $groupId
+                ? Group::query()->whereKey($groupId)->value('stream_profile_id')
+                : null;
             foreach ($job->payload as $channel) {
                 // Make sure name is set
                 if (! isset($channel['name'])) {
@@ -56,16 +62,37 @@ class ProcessM3uVodImportChunk implements ShouldQueue
                 }
 
                 // Add the channel for insert/update
-                $bulk[] = [
+                $row = [
                     ...$channel,
                     'group' => $groupName ?? null,
                     'group_id' => $groupId ?? null,
                 ];
+                if ($groupProfileId !== null && empty($row['stream_profile_id'])) {
+                    $row['stream_profile_id'] = $groupProfileId;
+                }
+                $bulk[] = $row;
             }
 
-            // Deduplicate the channels
+            // Assign source_id via collision-relative hashing.
+            // M3U channels carry a raw `source_key`; the first occurrence keeps the base md5
+            // hash (backwards-compatible), each subsequent duplicate in the same payload gets
+            // a :dup:N suffix so all entries survive as distinct channel records.
+            // Xtream channels have no `source_key` and their source_id is already set.
+            $seen = [];
             $bulk = collect($bulk)
-                ->unique(fn ($item) => $item['source_id'].$item['playlist_id'])
+                ->map(function ($item) use (&$seen) {
+                    if (! empty($item['source_key'])) {
+                        $key = $item['source_key'].($item['playlist_id'] ?? '');
+                        $count = $seen[$key] ?? 0;
+                        $item['source_id'] = $count === 0
+                            ? md5($item['source_key'])
+                            : md5($item['source_key'].':dup:'.$count);
+                        $seen[$key] = $count + 1;
+                    }
+                    unset($item['source_key']);
+
+                    return $item;
+                })
                 ->toArray();
 
             // Upsert the channels

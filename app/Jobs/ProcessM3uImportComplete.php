@@ -3,17 +3,18 @@
 namespace App\Jobs;
 
 use App\Enums\Status;
-use App\Events\SyncCompleted;
+use App\Enums\SyncRunPhase;
 use App\Models\Channel;
 use App\Models\Group;
 use App\Models\Job;
 use App\Models\PlaylistSyncStatus;
 use App\Models\PlaylistSyncStatusLog;
+use App\Models\SyncRun;
 use App\Models\User;
 use App\Services\EpgCacheService;
+use App\Services\SyncPipelineService;
 use App\Settings\GeneralSettings;
 use Carbon\Carbon;
-use Exception;
 use Filament\Notifications\Notification;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
@@ -54,9 +55,9 @@ class ProcessM3uImportComplete implements ShouldQueue
         public Carbon $start,
         public bool $maxHit = false,
         public bool $isNew = false,
-        public bool $runningSeriesImport = false,
         public bool $runningLiveImport = true, // Default to true for live imports
         public bool $runningVodImport = true, // Default to true for VOD imports
+        public ?int $syncRunId = null,
     ) {
         // Set the invalidate import settings from config
         $this->invalidateImport = config('dev.invalidate_import', null);
@@ -82,12 +83,14 @@ class ProcessM3uImportComplete implements ShouldQueue
         $user = User::find($this->userId);
         $playlist = $user->playlists()->find($this->playlistId);
 
-        // Get the removed groups
-        $removedGroups = Group::where([
-            ['custom', false],
-            ['playlist_id', $playlist->id],
-            ['import_batch_no', '!=', $this->batchNo],
-        ]);
+        // Get the removed groups (also catches groups created without a batch number, e.g. by CopyAttributesToPlaylist,
+        // since NULL != $batchNo evaluates to NULL in SQL and would otherwise escape cleanup)
+        $removedGroups = Group::where('custom', false)
+            ->where('playlist_id', $playlist->id)
+            ->where(function ($q) {
+                $q->whereNull('import_batch_no')
+                    ->orWhere('import_batch_no', '!=', $this->batchNo);
+            });
 
         // Get the newly added groups
         $newGroups = $playlist->groups()->where([
@@ -273,8 +276,10 @@ class ProcessM3uImportComplete implements ShouldQueue
                         ->broadcast($playlist->user)
                         ->sendToDatabase($playlist->user);
                 }
-            } catch (Exception $e) {
-                // Handle any exceptions that occur during EPG creation
+            } catch (\Throwable $e) {
+                // EPG creation is a best-effort post-import step: surface it
+                // to the user via the Filament notification center and let
+                // the import complete. We intentionally do not rethrow.
                 Notification::make()
                     ->danger()
                     ->title('EPG Creation Failed')
@@ -348,75 +353,47 @@ class ProcessM3uImportComplete implements ShouldQueue
 
         $this->seriesCleanup($playlist);
 
-        $syncVod = ($playlist->auto_sync_vod_stream_files || $playlist->auto_fetch_vod_metadata)
-            && $playlist->channels()->where([
-                ['enabled', true],
-                ['is_vod', true],
-            ])->exists();
+        // Hand off to the SyncPipeline.
+        //
+        // Two paths:
+        //   1. Modern (syncRunId set): a SyncRun was created at sync kickoff with
+        //      phases = [Import]. We now resolve the real post-import phases (using
+        //      the populated DB) and replace the phases array, then mark Import
+        //      complete so the next phase dispatches.
+        //   2. Legacy (syncRunId null): one-off partial actions that dispatched
+        //      ProcessM3uImport directly without going through startImport(). We
+        //      build and start a pipeline from scratch here.
+        //
+        // By the time this job runs, both VOD channels and Series rows are populated
+        // (series-discovery chunks run earlier in the chain), so FindReplace can safely
+        // target series titles before STRM filenames are generated.
+        $pipeline = app(SyncPipelineService::class);
 
-        if ($syncVod) {
-            // Check if syncing stream files too
-            $syncStreamFiles = $playlist->auto_sync_vod_stream_files;
-            $syncMetaData = $playlist->auto_fetch_vod_metadata;
-            if ($syncStreamFiles && $syncMetaData) {
-                $message = 'Syncing VOD stream files and fetching VOD metadata now. Please check back later.';
-            } elseif ($syncStreamFiles) {
-                $message = 'Syncing VOD stream files now. Please check back later.';
-            } elseif ($syncMetaData) {
-                $message = 'Fetching VOD metadata now. Please check back later.';
+        if ($this->syncRunId !== null) {
+            $run = SyncRun::find($this->syncRunId);
+            if ($run) {
+                $pipeline->expandPipelineAfterImport($run, $playlist, $settings);
+                $pipeline->completePhase($this->syncRunId, SyncRunPhase::Import);
+
+                return;
             }
 
-            // Process VOD import
-            dispatch(new ProcessM3uImportVod(
-                playlist: $playlist,
-                isNew: $this->isNew,
-                batchNo: $this->batchNo,
-            ));
-            Notification::make()
-                ->info()
-                ->title('Syncing VOD Channels')
-                ->body($message)
-                ->broadcast($playlist->user)
-                ->sendToDatabase($playlist->user);
+            // SyncRun vanished (shouldn't normally happen) — fall through to legacy path.
         }
 
-        if ($this->runningSeriesImport) {
-            return; // Exit early if series import is enabled, sync complete event will be fired after series import completes
-        }
-
-        // Fire the playlist synced event with new channel IDs for auto-merge
-        event(new SyncCompleted($playlist, 'playlist'));
+        $run = $pipeline->buildPipeline($playlist, $settings);
+        $pipeline->startRun($run);
     }
 
     /**
-     * Handle series cleanup and importing after playlist import completes.
+     * Remove orphaned series categories/series/episodes from a previous import batch.
+     * Series dispatch is handled in handle() so the VOD→Series ordering can be enforced.
      */
-    private function seriesCleanup($playlist)
+    private function seriesCleanup($playlist): void
     {
-        // First, we need to remove any invalid categories/series/episodes
         foreach ($playlist->categories()->where('import_batch_no', '!=', $this->batchNo)->cursor() as $category) {
             $category->series()->delete(); // will cascade to episodes
             $category->delete();
-        }
-
-        // Determine if syncing series metadata
-        $syncSeriesMetadata = $playlist->auto_fetch_series_metadata
-            && $playlist->series()->where('enabled', true)->exists();
-
-        if ($syncSeriesMetadata) {
-            // Process series import
-            dispatch(new ProcessM3uImportSeries(
-                playlist: $playlist,
-                force: true,
-                isNew: $this->isNew,
-                batchNo: $this->batchNo,
-            ));
-            Notification::make()
-                ->info()
-                ->title('Fetching Series Metadata')
-                ->body('Fetching series metadata now. This may take a while depending on how many series you have enabled. If stream file syncing is enabled, it will also be ran. Please check back later.')
-                ->broadcast($playlist->user)
-                ->sendToDatabase($playlist->user);
         }
     }
 

@@ -56,8 +56,12 @@ class Playlist extends Model
         'auto_merge_deactivate_failover' => 'boolean',
         'auto_merge_config' => 'array',
         'auto_probe_streams' => 'boolean',
+        'auto_probe_vod_streams' => 'boolean',
+        'probe_use_batching' => 'boolean',
+        'probe_timeout' => 'integer',
         'find_replace_rules' => 'array',
         'sort_alpha_config' => 'array',
+        'auto_sync_to_custom_config' => 'array',
         'emby_config' => 'array',
         'custom_headers' => 'array',
         'strict_live_ts' => 'boolean',
@@ -70,6 +74,7 @@ class Playlist extends Model
         'id_channel_by' => PlaylistChannelId::class,
         'source_type' => PlaylistSourceType::class,
         'disable_catchup' => 'boolean',
+        'disable_m3u_xtream_format' => 'boolean',
         'enable_channels' => 'boolean',
         'enable_vod_channels' => 'boolean',
         'enable_series' => 'boolean',
@@ -264,6 +269,12 @@ class Playlist extends Model
     public function syncStatuses(): HasMany
     {
         return $this->hasMany(PlaylistSyncStatus::class)
+            ->orderBy('created_at', 'desc');
+    }
+
+    public function syncRuns(): HasMany
+    {
+        return $this->hasMany(SyncRun::class)
             ->orderBy('created_at', 'desc');
     }
 

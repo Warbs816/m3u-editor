@@ -3,7 +3,9 @@
 namespace App\Listeners;
 
 use App\Enums\Status;
+use App\Enums\SyncRunPhase;
 use App\Events\SyncCompleted;
+use App\Jobs\AutoSyncGroupsToCustomPlaylist;
 use App\Jobs\GenerateEpgCache;
 use App\Jobs\MergeChannels;
 use App\Jobs\ProbeChannelStreams;
@@ -14,6 +16,7 @@ use App\Jobs\RunPostProcess;
 use App\Jobs\SyncPlexDvrJob;
 use App\Models\Epg;
 use App\Models\Playlist;
+use App\Models\SyncRun;
 use App\Plugins\PluginHookDispatcher;
 use Illuminate\Support\Facades\Bus;
 
@@ -30,11 +33,30 @@ class SyncListener
 
             // Only run the following on completed syncs
             if ($playlist->status === Status::Completed) {
-                // Handle saved find & replace rules and sort alpha if enabled
-                $this->dispatchNameProcessingPipeline($playlist);
+                $syncRun = $event->syncRunId
+                    ? SyncRun::where('id', $event->syncRunId)
+                        ->where('playlist_id', $playlist->id)
+                        ->first()
+                    : null;
 
-                // Handle channel merge & scrubbers if enabled
-                $this->dispatchChannelScanJobs($playlist);
+                // Skip if the pipeline already ran find-replace / sort-alpha as a tracked phase
+                if (! $syncRun?->isPhaseComplete(SyncRunPhase::FindReplace)) {
+                    $this->dispatchNameProcessingPipeline($playlist);
+                }
+
+                // Handle channel merge & scrubbers if enabled.
+                // Skip pieces already executed by the tracked pipeline (ChannelMerge runs
+                // merge; LiveProbe runs scrubbers + probe — they share the LiveProbe phase).
+                $this->dispatchChannelScanJobs(
+                    $playlist,
+                    skipMerge: (bool) $syncRun?->isPhaseComplete(SyncRunPhase::ChannelMerge),
+                    skipLiveProbe: (bool) $syncRun?->isPhaseComplete(SyncRunPhase::LiveProbe),
+                );
+
+                // Skip if the pipeline already ran custom playlist sync as a tracked phase
+                if (! $syncRun?->isPhaseComplete(SyncRunPhase::CustomPlaylistSync)) {
+                    $this->dispatchAutoSyncToCustomPlaylistJobs($playlist);
+                }
 
                 // Sync Plex DVR channel maps (lineup may have changed)
                 dispatch(new SyncPlexDvrJob(trigger: 'playlist_sync'));
@@ -50,11 +72,6 @@ class SyncListener
                     'dry_run' => false,
                     'user_id' => $playlist->user_id,
                 ]);
-
-                // Dispatch stream probing job if enabled for this playlist
-                if ($playlist->auto_probe_streams ?? false) {
-                    dispatch(new ProbeChannelStreams(playlistId: $playlist->id));
-                }
             }
         }
         if ($event->model instanceof Epg) {
@@ -110,77 +127,84 @@ class SyncListener
      * However, channel scrubber jobs should be dispatched after the merge channels job completes,
      * to ensure they run against the updated channel list and avoid potential conflicts with the merge process.
      */
-    private function dispatchChannelScanJobs(Playlist $playlist): void
+    private function dispatchChannelScanJobs(Playlist $playlist, bool $skipMerge = false, bool $skipLiveProbe = false): void
     {
-        $mergeJob = ($playlist->auto_merge_channels_enabled ?? false)
-            ? $this->getMergeJob($playlist)
+        // Merge channels first
+        $mergeJob = (! $skipMerge && ($playlist->auto_merge_channels_enabled ?? false))
+            ? self::getMergeJob($playlist)
             : null;
 
-        $scrubberJobs = $playlist->channelScrubbers()
-            ->where('recurring', true)->get()
-            ->map(fn ($scrubber) => new ProcessChannelScrubber($scrubber->id))
-            ->toArray();
+        // Run scrubbers after merge completes (if enabled).
+        // Scrubbers are bundled into the LiveProbe phase when the pipeline runs them,
+        // so honor skipLiveProbe here too.
+        $scrubberJobs = $skipLiveProbe
+            ? []
+            : $playlist->channelScrubbers()
+                ->where('recurring', true)->get()
+                ->map(fn ($scrubber) => new ProcessChannelScrubber($scrubber->id))
+                ->toArray();
 
+        // Run probe last since it only runs against enabled channels, so should wait for merge + scrubber jobs to complete
+        $probeJob = (! $skipLiveProbe && ($playlist->auto_probe_streams ?? false))
+           ? (new ProbeChannelStreams(playlistId: $playlist->id))
+           : null;
+
+        $chain = [];
         if ($mergeJob) {
-            Bus::chain([$mergeJob, ...$scrubberJobs])->dispatch();
-        } elseif (! empty($scrubberJobs)) {
-            Bus::chain($scrubberJobs)->dispatch();
+            $chain[] = $mergeJob;
+        }
+        if (count($scrubberJobs) > 0) {
+            $chain = array_merge($chain, $scrubberJobs);
+        }
+        if ($probeJob) {
+            $chain[] = $probeJob;
+        }
+        if (count($chain) > 0) {
+            Bus::chain($chain)->dispatch();
         }
     }
 
     /**
      * Dispatch post-processes for a model after sync.
      */
-    private function dispatchPostProcessJobs(Playlist|Epg $model, $lastSync = null): void
+    private function dispatchPostProcessJobs(Playlist|Epg $model, mixed $lastSync = null): void
     {
-        $model->postProcesses()->where([
-            ['event', 'synced'],
-            ['enabled', true],
-        ])->get()->each(function ($postProcess) use ($model, $lastSync) {
-            dispatch(new RunPostProcess(
-                $postProcess,
-                $model,
-                $lastSync
-            ));
-        });
+        $model->postProcesses()
+            ->where('event', 'synced')
+            ->where('enabled', true)
+            ->get()
+            ->each(fn ($postProcess) => dispatch(new RunPostProcess($postProcess, $model, $lastSync)));
     }
 
     /**
-     * Handle auto-merge channels after playlist sync.
+     * Build a MergeChannels job from playlist config.
+     *
+     * Public/static so SyncPipelineService can reuse this builder when running
+     * the merge as a tracked pipeline phase. Returns null if the merge would
+     * be a no-op (used to short-circuit dispatch decisions).
      */
-    private function getMergeJob(Playlist $playlist): ?MergeChannels
+    public static function getMergeJob(Playlist $playlist): ?MergeChannels
     {
-        // Get auto-merge configuration
         $config = $playlist->auto_merge_config ?? [];
         $useResolution = $config['check_resolution'] ?? false;
         $forceCompleteRemerge = $config['force_complete_remerge'] ?? false;
         $preferCatchupAsPrimary = $config['prefer_catchup_as_primary'] ?? false;
-        $newChannelsOnly = $config['new_channels_only'] ?? true; // Default to true for new channels only
+        $newChannelsOnly = $config['new_channels_only'] ?? true;
         $preferredPlaylistId = $config['preferred_playlist_id'] ?? null;
         $failoverPlaylists = $config['failover_playlists'] ?? [];
         $deactivateFailover = (bool) ($playlist->auto_merge_deactivate_failover ?? false);
 
-        // Build the playlists collection for merging
-        // Start with the current playlist
         $playlists = collect([['playlist_failover_id' => $playlist->id]]);
 
-        // Add any additional failover playlists from config
-        if (! empty($failoverPlaylists)) {
-            foreach ($failoverPlaylists as $failover) {
-                $failoverId = is_array($failover) ? ($failover['playlist_failover_id'] ?? null) : $failover;
-                if ($failoverId && $failoverId != $playlist->id) {
-                    $playlists->push(['playlist_failover_id' => $failoverId]);
-                }
+        foreach ($failoverPlaylists as $failover) {
+            $failoverId = is_array($failover) ? ($failover['playlist_failover_id'] ?? null) : $failover;
+            if ($failoverId && $failoverId != $playlist->id) {
+                $playlists->push(['playlist_failover_id' => $failoverId]);
             }
         }
 
-        // Determine the preferred playlist ID (use configured one or fallback to current playlist)
         $effectivePlaylistId = $preferredPlaylistId ? (int) $preferredPlaylistId : $playlist->id;
 
-        // Build weighted config if any weighted priority options are set
-        $weightedConfig = $this->buildWeightedConfig($config);
-
-        // Dispatch the merge job
         return new MergeChannels(
             user: $playlist->user,
             playlists: $playlists,
@@ -189,17 +213,17 @@ class SyncListener
             deactivateFailoverChannels: $deactivateFailover,
             forceCompleteRemerge: $forceCompleteRemerge,
             preferCatchupAsPrimary: $preferCatchupAsPrimary,
-            weightedConfig: $weightedConfig,
+            weightedConfig: self::buildWeightedConfig($config),
             newChannelsOnly: $newChannelsOnly,
+            regexPatterns: ! empty($config['regex_patterns'] ?? []) ? $config['regex_patterns'] : null,
         );
     }
 
     /**
      * Build weighted config array from playlist config if any weighted options are set
      */
-    private function buildWeightedConfig(array $config): ?array
+    private static function buildWeightedConfig(array $config): ?array
     {
-        // Check if any weighted priority options are configured
         $hasWeightedOptions = ! empty($config['priority_attributes'])
             || ! empty($config['group_priorities'])
             || ! empty($config['priority_keywords'])
@@ -217,6 +241,46 @@ class SyncListener
             'prefer_codec' => $config['prefer_codec'] ?? null,
             'exclude_disabled_groups' => $config['exclude_disabled_groups'] ?? false,
         ];
+    }
+
+    /**
+     * Dispatch auto-sync jobs to push configured source groups into custom playlists.
+     * Runs after each successful playlist sync.
+     */
+    private function dispatchAutoSyncToCustomPlaylistJobs(Playlist $playlist): void
+    {
+        $rules = collect($playlist->auto_sync_to_custom_config ?? [])
+            ->filter(fn (array $rule): bool => $rule['enabled'] ?? false);
+
+        if ($rules->isEmpty()) {
+            return;
+        }
+
+        foreach ($rules as $rule) {
+            $customPlaylistId = (int) ($rule['custom_playlist_id'] ?? 0);
+            $groupIds = array_map('intval', (array) ($rule['groups'] ?? []));
+            $type = $rule['type'] === 'series_categories' ? 'series' : 'channel';
+            $syncMode = $rule['sync_mode'] ?? 'full_sync';
+            $data = [
+                'mode' => $rule['mode'] ?? 'original',
+                'category' => $rule['category'] ?? null,
+                'new_category' => $rule['new_category'] ?? null,
+            ];
+
+            if (! $customPlaylistId || empty($groupIds)) {
+                continue;
+            }
+
+            dispatch(new AutoSyncGroupsToCustomPlaylist(
+                userId: $playlist->user_id,
+                playlistId: $playlist->id,
+                groupIds: $groupIds,
+                customPlaylistId: $customPlaylistId,
+                data: $data,
+                type: $type,
+                syncMode: $syncMode,
+            ));
+        }
     }
 
     /**

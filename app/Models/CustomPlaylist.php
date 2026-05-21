@@ -41,6 +41,7 @@ class CustomPlaylist extends Model
         'strict_live_ts' => 'boolean',
         'use_sticky_session' => 'boolean',
         'id_channel_by' => PlaylistChannelId::class,
+        'disable_m3u_xtream_format' => 'boolean',
     ];
 
     public function user(): BelongsTo
@@ -61,7 +62,7 @@ class CustomPlaylist extends Model
     public function channels(): BelongsToMany
     {
         return $this->belongsToMany(Channel::class, 'channel_custom_playlist')
-            ->withPivot(['channel_number']);
+            ->withPivot(['channel_number', 'sort']);
     }
 
     public function enabled_channels(): BelongsToMany

@@ -5,6 +5,8 @@ namespace App\Filament\Pages;
 use App\Filament\CopilotTools\EpgChannelMatcherTool;
 use App\Filament\CopilotTools\EpgMappingApplyTool;
 use App\Filament\CopilotTools\EpgMappingStateTool;
+use App\Filament\CopilotTools\ExecuteDatabaseQueryTool;
+use App\Filament\CopilotTools\GetDatabaseSchemaTool;
 use App\Filament\CopilotTools\SearchDocsTool;
 use App\Filament\Resources\Assets\AssetResource;
 use App\Jobs\RestartQueue;
@@ -18,18 +20,12 @@ use App\Services\PlaylistService;
 use App\Settings\GeneralSettings;
 use Cron\CronExpression;
 use Dom\Text;
-use EslamRedaDiv\FilamentCopilot\Tools\GetToolsTool;
-use EslamRedaDiv\FilamentCopilot\Tools\ListPagesTool;
-use EslamRedaDiv\FilamentCopilot\Tools\ListResourcesTool;
-use EslamRedaDiv\FilamentCopilot\Tools\ListWidgetsTool;
-use EslamRedaDiv\FilamentCopilot\Tools\RecallTool;
-use EslamRedaDiv\FilamentCopilot\Tools\RememberTool;
-use EslamRedaDiv\FilamentCopilot\Tools\RunToolTool;
 use Exception;
 use Filament\Actions\Action;
 use Filament\Actions\ActionGroup;
 use Filament\Forms\Components\CheckboxList;
 use Filament\Forms\Components\FileUpload;
+use Filament\Forms\Components\Placeholder;
 use Filament\Forms\Components\Repeater;
 use Filament\Forms\Components\Select;
 use Filament\Forms\Components\TagsInput;
@@ -55,6 +51,8 @@ use Illuminate\Support\Facades\Redis;
 use Illuminate\Support\HtmlString;
 use Illuminate\Support\Str;
 use Ramsey\Uuid\Guid\Fields;
+use Spatie\DiscordAlerts\Facades\DiscordAlert;
+use Spatie\SlackAlerts\Facades\SlackAlert;
 
 class Preferences extends SettingsPage
 {
@@ -427,13 +425,23 @@ class Preferences extends SettingsPage
                                                         }
                                                         $details .= "\n";
 
+                                                        // Transcoding is available in all modes
+                                                        $details .= "**Transcoding:** ✅ Available\n";
+                                                        $details .= "\n";
+
                                                         // FFmpeg Version
                                                         $ffmpegVersion = $info['ffmpeg_version'] ?? 'Unknown';
                                                         $details .= "**FFmpeg Version:** \n\n{$ffmpegVersion}\n\n";
 
-                                                        // Transcoding is available in all modes
-                                                        $details .= "**Transcoding:** ✅ Available\n";
-                                                        $details .= "\n";
+                                                        // Streamlink
+                                                        $streamlinkVersion = $info['streamlink_version'] ?? null;
+                                                        $streamlinkStatus = $streamlinkVersion ? "✅ {$streamlinkVersion}" : '❌ Not installed';
+                                                        $details .= "**Streamlink:** {$streamlinkStatus}\n\n";
+
+                                                        // yt-dlp
+                                                        $ytdlpVersion = $info['ytdlp_version'] ?? null;
+                                                        $ytdlpStatus = $ytdlpVersion ? "✅ {$ytdlpVersion}" : '❌ Not installed';
+                                                        $details .= "**yt-dlp:** {$ytdlpStatus}\n\n";
 
                                                         // Redis Pooling
                                                         $poolingEnabled = $info['redis']['pooling_enabled'];
@@ -778,7 +786,7 @@ class Preferences extends SettingsPage
                                 Section::make(__('In-App Player Transcoding'))
                                     ->description(__('Select the default transcoding profiles used when playing streams in the in-app player.'))
                                     ->columnSpanFull()
-                                    ->columns(2)
+                                    ->columns(5)
                                     ->collapsible()
                                     ->collapsed()
                                     ->schema([
@@ -797,7 +805,8 @@ class Preferences extends SettingsPage
                                                     ->url('/stream-profiles')
                                                     ->openUrlInNewTab(false)
                                             )
-                                            ->helperText(__('The default transcoding profile used for the in-app player for Live content. Leave empty to disable transcoding (some streams may not be playable in the player).')),
+                                            ->columnSpan(2)
+                                            ->helperText(__('The default transcoding profile used by the in-app player for Live content. A per-channel stream profile (if set) takes priority over this. Leave empty to disable transcoding (some streams may not be playable in the player).')),
                                         Select::make('default_vod_stream_profile_id')
                                             ->label(__('VOD and Series Transcoding Profile'))
                                             ->searchable()
@@ -813,7 +822,19 @@ class Preferences extends SettingsPage
                                                     ->url('/stream-profiles')
                                                     ->openUrlInNewTab(false)
                                             )
-                                            ->helperText(__('The default transcoding profile used for the in-app player for VOD/Series content. Leave empty to disable transcoding (some streams may not be playable in the player).')),
+                                            ->columnSpan(2)
+                                            ->helperText(__('The default transcoding profile used by the in-app player for VOD/Series content. A per-channel stream profile (if set) takes priority over this. Leave empty to disable transcoding (some streams may not be playable in the player).')),
+                                        TextInput::make('max_concurrent_floating_players')
+                                            ->label(__('Max Concurrent Players'))
+                                            ->hintIcon(
+                                                'heroicon-m-question-mark-circle',
+                                                tooltip: __('Set to 0 (or clear value) for unlimited.')
+                                            )
+                                            ->numeric()
+                                            ->placeholder(0)
+                                            ->minValue(0)
+                                            ->step(1)
+                                            ->helperText(__('Maximum number of players that can be open at once.')),
                                     ]),
                                 Section::make(__('Casting Transcoding'))
                                     ->description(new HtmlString(__('Select the transcoding profiles used when casting streams to a Chromecast or similar device. <strong>Profiles must output HLS (m3u8) — Chromecast does not support MPEGTS or other formats.</strong> If your provider already serves HLS streams, these can be left empty.')))
@@ -904,44 +925,46 @@ class Preferences extends SettingsPage
 
                         Tab::make(__('Sync Options'))
                             ->schema([
-                                Section::make(__('Provider Request Delay'))
-                                    ->description(__('Add a delay between requests to providers to avoid rate limiting.'))
+                                Section::make(__('Provider Rate Limiting & Concurrency'))
+                                    ->description(__('Control request concurrency for parallel processing and add delays between requests to avoid provider rate limiting.'))
                                     ->columnSpan('full')
-                                    ->columns(3)
+                                    ->columns(4)
                                     ->collapsible(false)
                                     ->schema([
                                         Toggle::make('enable_provider_request_delay')
                                             ->label(__('Enable request delay'))
                                             ->live()
-                                            ->helperText(__('When enabled, a delay will be added between requests to the provider during playlist and EPG syncs.')),
-                                        TextInput::make('provider_request_delay_ms')
-                                            ->label(__('Request delay (milliseconds)'))
-                                            ->integer()
-                                            ->required()
-                                            ->hintIcon(
-                                                'heroicon-m-question-mark-circle',
-                                                tooltip: 'Recommended: 500-2000ms. Higher values reduce load on provider but increase sync time.'
-                                            )
-                                            ->minValue(100)
-                                            ->maxValue(10000)
-                                            ->step(100)
-                                            ->default(500)
-                                            ->suffix('ms')
-                                            ->hidden(fn ($get) => ! $get('enable_provider_request_delay'))
-                                            ->helperText(__('Delay in milliseconds between requests.')),
+                                            ->inline(false)
+                                            ->columnSpan(2)
+                                            ->helperText(__('When enabled, a delay will be added between requests to the provider during playlist and EPG syncs and other stream processing tasks.')),
                                         TextInput::make('provider_max_concurrent_requests')
                                             ->label(__('Max concurrent requests'))
                                             ->integer()
+                                            ->columnSpan(2)
                                             ->required()
                                             ->hintIcon(
                                                 'heroicon-m-question-mark-circle',
                                                 tooltip: 'Lower values (1-2) are safer but slower. Set to 1 to process requests sequentially.'
                                             )
                                             ->minValue(1)
-                                            ->maxValue(10)
                                             ->default(2)
+                                            ->helperText(__('Maximum number of simultaneous requests allowed. Also controls the level of parallelism for batch operations such as stream probing and channel scrubbing.')),
+                                        TextInput::make('provider_request_delay_ms')
+                                            ->label(__('Request delay'))
+                                            ->integer()
+                                            ->required()
+                                            ->hintIcon(
+                                                'heroicon-m-question-mark-circle',
+                                                tooltip: 'Recommended: 500-2000ms. Higher values reduce load on provider but increase sync time.'
+                                            )
+                                            ->columnSpan(1)
+                                            ->minValue(100)
+                                            ->maxValue(10000)
+                                            ->step(100)
+                                            ->default(500)
+                                            ->suffix('ms')
                                             ->hidden(fn ($get) => ! $get('enable_provider_request_delay'))
-                                            ->helperText(__('Maximum number of simultaneous requests to the provider.')),
+                                            ->helperText(__('Minimum delay between provider requests, in milliseconds.')),
                                     ]),
                                 Section::make(__('Sync Invalidation'))
                                     ->description(__('Prevent sync from proceeding if conditions are met.'))
@@ -1328,20 +1351,7 @@ class Preferences extends SettingsPage
                                             ->placeholder(__('Enter your TMDB API Key (v3 auth)'))
                                             ->password()
                                             ->revealable()
-                                            ->columnSpanFull()
                                             ->helperText(__('Your TMDB API key (v3 auth). You can get one for free at themoviedb.org.')),
-                                        Toggle::make('tmdb_auto_lookup_on_import')
-                                            ->label(__('Auto-lookup on metadata fetch'))
-                                            ->helperText(__('Automatically lookup TMDB IDs when fetching metadata for VOD and Series. This may slow down imports and metadata fetching for large playlists. Will only be fetched for enabled items.'))
-                                            ->default(false),
-                                        TextInput::make('tmdb_rate_limit')
-                                            ->label(__('Rate Limit (requests/second)'))
-                                            ->placeholder(__('40'))
-                                            ->numeric()
-                                            ->minValue(1)
-                                            ->maxValue(50)
-                                            ->default(40)
-                                            ->helperText(__('Maximum TMDB API requests per second. TMDB allows ~40 req/s for free accounts.')),
                                         Select::make('tmdb_language')
                                             ->label(__('Search Language'))
                                             ->searchable()
@@ -1371,6 +1381,22 @@ class Preferences extends SettingsPage
                                             ])
                                             ->default('en-US')
                                             ->helperText(__('Preferred language for TMDB searches.')),
+                                        Toggle::make('tmdb_auto_lookup_on_import')
+                                            ->label(__('Auto-lookup on metadata fetch'))
+                                            ->helperText(__('Automatically lookup TMDB IDs when fetching metadata for VOD and Series. This may slow down imports and metadata fetching for large playlists. Will only be fetched for enabled items.'))
+                                            ->default(false),
+                                        Toggle::make('tmdb_auto_create_groups')
+                                            ->label(__('Auto-create groups/categories from TMDB genres'))
+                                            ->helperText(__('When enabled, TMDB metadata fetching will automatically create new groups (for VOD) and categories (for Series) based on TMDB genres. When disabled, only existing groups/categories will be used.'))
+                                            ->default(false),
+                                        TextInput::make('tmdb_rate_limit')
+                                            ->label(__('Rate Limit (requests/second)'))
+                                            ->placeholder(__('40'))
+                                            ->numeric()
+                                            ->minValue(1)
+                                            ->maxValue(50)
+                                            ->default(40)
+                                            ->helperText(__('Maximum TMDB API requests per second. TMDB allows ~40 req/s for free accounts.')),
                                         TextInput::make('tmdb_confidence_threshold')
                                             ->label(__('Match Confidence Threshold (%)'))
                                             ->placeholder(__('80'))
@@ -1409,7 +1435,7 @@ class Preferences extends SettingsPage
                             ->icon('heroicon-o-sparkles')
                             ->schema([
                                 Section::make(__('AI Copilot'))
-                                    ->description(__('You will need to save and refresh the page after changing settings for them to take effect.'))
+                                    ->description(__('You will need to save and refresh the page after changing settings for them to take effect. Look for the ✨ AI Copilot icon in the top navigation bar after enabling.'))
                                     ->schema([
                                         Toggle::make('copilot_enabled')
                                             ->label(__('Enable AI Copilot'))
@@ -1438,6 +1464,7 @@ class Preferences extends SettingsPage
                                                         'groq' => 'Groq',
                                                         'deepseek' => 'DeepSeek',
                                                         'xai' => 'xAI (Grok)',
+                                                        'minimax' => 'MiniMax',
                                                         'openrouter' => 'OpenRouter',
                                                         'ollama' => 'Ollama (Local)',
                                                     ])
@@ -1447,17 +1474,17 @@ class Preferences extends SettingsPage
                                                 TextInput::make('copilot_model')
                                                     ->label(__('Model'))
                                                     ->placeholder(fn (Get $get): string => match ($get('copilot_provider')) {
-                                                        'anthropic' => 'claude-sonnet-4',
-                                                        'gemini' => 'gemini-2.0-flash',
+                                                        'anthropic' => 'claude-sonnet-4-6',
+                                                        'gemini' => 'gemini-2.5-flash',
                                                         'mistral' => 'mistral-large-latest',
                                                         'groq' => 'llama-3.3-70b-versatile',
-                                                        'deepseek' => 'deepseek-chat',
+                                                        'deepseek' => 'deepseek-v4-flash',
                                                         'xai' => 'grok-3',
-                                                        'openrouter' => 'openai/gpt-4o',
+                                                        'minimax' => 'MiniMax-M2.7',
+                                                        'openrouter' => 'openai/gpt-5.4',
                                                         'ollama' => 'llama3',
-                                                        default => 'gpt-4o',
+                                                        default => 'gpt-5.4-mini',
                                                     })
-                                                    ->required(fn (Get $get): bool => (bool) $get('copilot_enabled'))
                                                     ->helperText(__('The model to use. Leave blank to use the provider default.')),
                                             ]),
                                         TextInput::make('copilot_api_key')
@@ -1473,9 +1500,10 @@ class Preferences extends SettingsPage
                                             ->url()
                                             ->placeholder(fn (Get $get): string => match ($get('copilot_provider')) {
                                                 'ollama' => 'http://localhost:11434',
+                                                'minimax' => 'https://api.minimax.io/v1',
                                                 default => 'https://api.openai.com/v1',
                                             })
-                                            ->visible(fn (Get $get): bool => in_array($get('copilot_provider'), ['openai', 'ollama']))
+                                            ->visible(fn (Get $get): bool => in_array($get('copilot_provider'), ['openai', 'ollama', 'minimax']))
                                             ->helperText(__('Override the default API base URL. Leave blank to use the provider default. Useful for self-hosted models or proxy endpoints.')),
                                     ]),
                                 Section::make(__('System Prompt'))
@@ -1496,30 +1524,30 @@ class Preferences extends SettingsPage
                                             ->label(__('Enabled Tools'))
                                             ->bulkToggleable()
                                             ->options([
-                                                GetToolsTool::class => __('Get Available Tools'),
-                                                RunToolTool::class => __('Run Tool'),
-                                                ListResourcesTool::class => __('List Resources'),
-                                                ListPagesTool::class => __('List Pages'),
-                                                ListWidgetsTool::class => __('List Widgets'),
-                                                RememberTool::class => __('Remember'),
-                                                RecallTool::class => __('Recall Memories'),
                                                 SearchDocsTool::class => __('Search Documentation'),
                                                 EpgMappingStateTool::class => __('EPG Mapper: Mapping State'),
                                                 EpgChannelMatcherTool::class => __('EPG Mapper: Channel Matcher'),
                                                 EpgMappingApplyTool::class => __('EPG Mapper: Apply Mappings'),
+                                                GetDatabaseSchemaTool::class => __('Database: Get Schema'),
+                                                ExecuteDatabaseQueryTool::class => __('Database: Execute Query'),
                                             ])
+                                            ->afterStateHydrated(function ($component, $state) {
+                                                // Strip built-in tools that were saved by older versions.
+                                                // They are always registered by ToolRegistry and must not
+                                                // appear in the options list, or Filament validation fails.
+                                                $validOptions = array_keys($component->getOptions());
+                                                $component->state(
+                                                    array_values(array_filter(
+                                                        (array) $state,
+                                                        fn ($v) => \in_array($v, $validOptions, true)
+                                                    ))
+                                                );
+                                            })
                                             ->columns(2)
                                             ->default([
-                                                GetToolsTool::class,
-                                                RunToolTool::class,
-                                                ListResourcesTool::class,
-                                                ListPagesTool::class,
-                                                ListWidgetsTool::class,
-                                                RememberTool::class,
-                                                RecallTool::class,
                                                 SearchDocsTool::class,
                                             ])
-                                            ->helperText(__('Select which tools the AI assistant can use.')),
+                                            ->helperText(__('Select which additional tools the AI assistant can use. Core tools (navigation, memory) are always available.')),
                                     ]),
                                 Section::make(__('Quick Actions'))
                                     ->description(__('Pre-defined prompts displayed as buttons in the Copilot chat window.'))
@@ -1543,6 +1571,186 @@ class Preferences extends SettingsPage
                                             ->reorderable()
                                             ->collapsible()
                                             ->defaultItems(0),
+                                    ]),
+                            ]),
+                        Tab::make(__('Alerts'))
+                            ->icon('heroicon-o-bell-alert')
+                            ->schema([
+                                Section::make(__('Discord'))
+                                    ->description(__('Send alerts to a Discord channel via an incoming webhook.'))
+                                    ->headerActions([
+                                        Action::make('test_discord_alert')
+                                            ->label(__('Send test alert'))
+                                            ->icon('heroicon-o-paper-airplane')
+                                            ->color('gray')
+                                            ->size('sm')
+                                            ->visible(fn (Get $get): bool => (bool) $get('discord_alerts_enabled') && ! empty($get('discord_webhook_url')))
+                                            ->action(function (Get $get): void {
+                                                $webhookUrl = $get('discord_webhook_url');
+
+                                                if (empty($webhookUrl)) {
+                                                    Notification::make()
+                                                        ->title(__('No Webhook URL'))
+                                                        ->body(__('Please enter a Discord webhook URL first.'))
+                                                        ->warning()
+                                                        ->send();
+
+                                                    return;
+                                                }
+
+                                                try {
+                                                    DiscordAlert::to($webhookUrl)->message('[TEST] This is a test alert from m3u-editor. Your Discord integration is working correctly.');
+
+                                                    Notification::make()
+                                                        ->title(__('Test Alert Sent'))
+                                                        ->body(__('Check your Discord channel for the test message.'))
+                                                        ->success()
+                                                        ->send();
+                                                } catch (Exception $e) {
+                                                    Notification::make()
+                                                        ->title(__('Failed to Send Alert'))
+                                                        ->body($e->getMessage())
+                                                        ->danger()
+                                                        ->send();
+                                                }
+                                            }),
+                                    ])
+                                    ->schema([
+                                        Toggle::make('discord_alerts_enabled')
+                                            ->label(__('Enable Discord alerts'))
+                                            ->helperText(__('When enabled, error-level log entries will be forwarded to your Discord channel.'))
+                                            ->live(),
+                                        TextInput::make('discord_webhook_url')
+                                            ->label(__('Discord Webhook URL'))
+                                            ->url()
+                                            ->placeholder('https://discord.com/api/webhooks/...')
+                                            ->helperText(__('Create an Incoming Webhook in your Discord server settings and paste the URL here.'))
+                                            ->visible(fn (Get $get): bool => (bool) $get('discord_alerts_enabled'))
+                                            ->columnSpanFull(),
+                                    ]),
+                                Section::make(__('Slack'))
+                                    ->description(__('Send alerts to a Slack channel via an incoming webhook.'))
+                                    ->headerActions([
+                                        Action::make('test_slack_alert')
+                                            ->label(__('Send test alert'))
+                                            ->icon('heroicon-o-paper-airplane')
+                                            ->color('gray')
+                                            ->size('sm')
+                                            ->visible(fn (Get $get): bool => (bool) $get('slack_alerts_enabled') && ! empty($get('slack_webhook_url')))
+                                            ->action(function (Get $get): void {
+                                                $webhookUrl = $get('slack_webhook_url');
+
+                                                if (empty($webhookUrl)) {
+                                                    Notification::make()
+                                                        ->title(__('No Webhook URL'))
+                                                        ->body(__('Please enter a Slack webhook URL first.'))
+                                                        ->warning()
+                                                        ->send();
+
+                                                    return;
+                                                }
+
+                                                try {
+                                                    SlackAlert::to($webhookUrl)->sync()->message('[TEST] This is a test alert from m3u-editor. Your Slack integration is working correctly.');
+
+                                                    Notification::make()
+                                                        ->title(__('Test Alert Sent'))
+                                                        ->body(__('Check your Slack channel for the test message.'))
+                                                        ->success()
+                                                        ->send();
+                                                } catch (Exception $e) {
+                                                    Notification::make()
+                                                        ->title(__('Failed to Send Alert'))
+                                                        ->body($e->getMessage())
+                                                        ->danger()
+                                                        ->send();
+                                                }
+                                            }),
+                                    ])
+                                    ->schema([
+                                        Toggle::make('slack_alerts_enabled')
+                                            ->label(__('Enable Slack alerts'))
+                                            ->helperText(__('When enabled, error-level log entries will be forwarded to your Slack channel.'))
+                                            ->live(),
+                                        Placeholder::make('slack_setup_guide')
+                                            ->label(__('Setup Guide'))
+                                            ->content(new HtmlString(<<<'HTML'
+<div class="space-y-3 text-sm text-gray-600 dark:text-gray-400">
+    <p>Create a Slack App using the manifest below, then paste the generated webhook URL into the field below.</p>
+    <ol class="list-decimal list-inside space-y-1.5 ml-1">
+        <li>Go to <a href="https://api.slack.com/apps" target="_blank" class="text-primary-600 dark:text-primary-400 hover:underline font-medium">api.slack.com/apps</a> and click <strong class="text-gray-700 dark:text-gray-300">Create New App</strong></li>
+        <li>Choose <strong class="text-gray-700 dark:text-gray-300">From an app manifest</strong></li>
+        <li>Select your workspace and click <strong class="text-gray-700 dark:text-gray-300">Next</strong></li>
+        <li>Switch to the <strong class="text-gray-700 dark:text-gray-300">JSON</strong> tab, paste the manifest below, then click <strong class="text-gray-700 dark:text-gray-300">Next → Create</strong></li>
+        <li>In the app settings, go to <strong class="text-gray-700 dark:text-gray-300">Incoming Webhooks</strong> and toggle it <strong class="text-gray-700 dark:text-gray-300">On</strong></li>
+        <li>Click <strong class="text-gray-700 dark:text-gray-300">Add New Webhook to Workspace</strong>, select a channel, then click <strong class="text-gray-700 dark:text-gray-300">Allow</strong></li>
+        <li>Copy the <strong class="text-gray-700 dark:text-gray-300">Webhook URL</strong> from the list and paste it into the field below</li>
+        <li><em>Optional:</em> To add the m3u editor icon go to <strong class="text-gray-700 dark:text-gray-300">Basic Information → Display Information</strong> and upload the icon from the URL at the bottom of this guide</li>
+    </ol>
+    <div class="mt-3">
+        <p class="font-medium text-gray-700 dark:text-gray-300 mb-1.5">App Manifest (JSON):</p>
+        <pre class="bg-gray-100 dark:bg-gray-800 rounded-lg p-3 text-xs overflow-x-auto text-gray-700 dark:text-gray-300 select-all">{
+    "display_information": {
+        "name": "m3u editor",
+        "description": "Alerts and notifications from m3u editor",
+        "background_color": "#000000"
+    },
+    "features": {
+        "bot_user": {
+            "display_name": "m3u editor",
+            "always_online": false
+        }
+    },
+    "oauth_config": {
+        "scopes": {
+            "bot": [
+                "incoming-webhook"
+            ]
+        }
+    },
+    "settings": {
+        "org_deploy_enabled": false,
+        "socket_mode_enabled": false,
+        "is_hosted": false,
+        "token_rotation_enabled": false
+    }
+}</pre>
+    </div>
+    <div class="mt-2">
+        <p class="font-medium text-gray-700 dark:text-gray-300 mb-1">Optional App Icon URL:</p>
+        <code class="bg-gray-100 dark:bg-gray-800 rounded px-2 py-1 text-xs text-gray-700 dark:text-gray-300 select-all">https://raw.githubusercontent.com/m3ue/m3u-editor/refs/heads/master/public/logo.png</code>
+    </div>
+</div>
+HTML))
+                                            ->visible(fn (Get $get): bool => (bool) $get('slack_alerts_enabled'))
+                                            ->columnSpanFull(),
+                                        TextInput::make('slack_webhook_url')
+                                            ->label(__('Slack Webhook URL'))
+                                            ->url()
+                                            ->hintAction(
+                                                Action::make('get_slack_webhook_url')
+                                                    ->label(__('Open Slack Apps'))
+                                                    ->icon('heroicon-o-arrow-top-right-on-square')
+                                                    ->iconPosition('after')
+                                                    ->size('sm')
+                                                    ->url('https://api.slack.com/apps')
+                                                    ->openUrlInNewTab(true)
+                                            )
+                                            ->placeholder('https://hooks.slack.com/services/...')
+                                            ->helperText(__('Follow the setup guide above to create a Slack App and generate a webhook URL.'))
+                                            ->visible(fn (Get $get): bool => (bool) $get('slack_alerts_enabled'))
+                                            ->columnSpanFull(),
+                                    ]),
+                                Section::make(__('Additional Notifications'))
+                                    ->description(__('Opt in to targeted notifications beyond the default error log forwarding.'))
+                                    ->visible(fn (Get $get): bool => (bool) $get('discord_alerts_enabled') || (bool) $get('slack_alerts_enabled'))
+                                    ->schema([
+                                        Toggle::make('alerts_on_job_failed')
+                                            ->label(__('Notify on queued job failures'))
+                                            ->helperText(__('Sends an alert whenever a queued job (import, sync, probe, etc.) fails permanently after all retry attempts.')),
+                                        Toggle::make('alerts_on_import_failed')
+                                            ->label(__('Notify on playlist import failures'))
+                                            ->helperText(__('Sends an alert when a playlist sync fails entirely, e.g. all provider URLs were unreachable.')),
                                     ]),
                             ]),
                         Tab::make(__('Debugging'))

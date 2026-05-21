@@ -46,18 +46,18 @@ class EpgChannelMatcherTool extends BaseTool
     {
         return [
             'playlist_id' => $schema->integer()
-                ->description('The playlist ID containing the channels to match.')
+                ->description(__('The playlist ID containing the channels to match.'))
                 ->required(),
             'group' => $schema->string()
-                ->description('The channel group name to process (e.g. "UNITED STATES").')
+                ->description(__('The channel group name to process (e.g. "UNITED STATES").'))
                 ->required(),
             'epg_id' => $schema->integer()
-                ->description('The EPG source ID to match against. Always ask the user which EPG source to use before calling this tool.')
+                ->description(__('The EPG source ID to match against. Always ask the user which EPG source to use before calling this tool.'))
                 ->required(),
             'limit' => $schema->integer()
-                ->description('Channels to process per call (default: 50, max: 100). Use with offset for pagination.'),
+                ->description(__('Channels to process per call (default: 50, max: 100). Use with offset for pagination.')),
             'offset' => $schema->integer()
-                ->description('Channels to skip (default: 0). Increment by limit to page through a large group.'),
+                ->description(__('Channels to skip (default: 0). Increment by limit to page through a large group.')),
         ];
     }
 
@@ -69,17 +69,22 @@ class EpgChannelMatcherTool extends BaseTool
         $limit = min(self::MAX_LIMIT, max(1, (int) ($request['limit'] ?? self::DEFAULT_LIMIT)));
         $offset = max(0, (int) ($request['offset'] ?? 0));
 
-        $playlist = Playlist::find($playlistId);
+        $playlist = Playlist::where('id', $playlistId)
+            ->where('user_id', auth()->id())
+            ->first();
         if (! $playlist) {
             return "Playlist #{$playlistId} not found.";
         }
 
-        $epg = Epg::find($epgId);
+        $epg = Epg::where('id', $epgId)
+            ->where('user_id', auth()->id())
+            ->first();
         if (! $epg) {
             return "EPG source #{$epgId} not found.";
         }
 
         $totalUnmapped = Channel::where('playlist_id', $playlistId)
+            ->where('user_id', auth()->id())
             ->where('group', $group)
             ->whereNull('epg_channel_id')
             ->count();
@@ -89,6 +94,7 @@ class EpgChannelMatcherTool extends BaseTool
         }
 
         $channels = Channel::where('playlist_id', $playlistId)
+            ->where('user_id', auth()->id())
             ->where('group', $group)
             ->whereNull('epg_channel_id')
             ->orderBy('name')
@@ -267,10 +273,18 @@ class EpgChannelMatcherTool extends BaseTool
      */
     private function similarity(string $a, string $b): int
     {
-        similar_text($a, $b, $percent);
-        $score = (int) round($percent);
+        if ($a === '' || $b === '') {
+            return 0;
+        }
 
-        if ($a !== '' && $b !== '' && (str_contains($b, $a) || str_contains($a, $b))) {
+        $lenA = strlen($a);
+        $lenB = strlen($b);
+        $maxLen = max($lenA, $lenB);
+
+        $dist = levenshtein($a, $b);
+        $score = (int) round((1 - $dist / $maxLen) * 100);
+
+        if (str_contains($b, $a) || str_contains($a, $b)) {
             $score = max($score, 80);
         }
 

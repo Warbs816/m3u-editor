@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Facades\PlaylistFacade;
 use App\Models\MediaServerIntegration;
 use Exception;
 use Illuminate\Http\Client\PendingRequest;
@@ -403,6 +404,76 @@ class PlexManagementService
     }
 
     /**
+     * Resolve the canonical playlist URLs used across the application.
+     *
+     * @return array{hdhr: string, epg: string}|null Returns null when the playlist cannot be found.
+     */
+    protected function resolvePlaylistUrls(string $playlistUuid): ?array
+    {
+        $playlist = PlaylistFacade::resolvePlaylistByUuid($playlistUuid);
+
+        if (! $playlist) {
+            return null;
+        }
+
+        return PlaylistFacade::getUrls($playlist);
+    }
+
+    /**
+     * Get the stored HDHR base URL from a tuner entry.
+     *
+     * Looks up the tuner by device key and playlist UUID in the integration's
+     * plex_dvr_tuners JSON column and returns the stored hdhr_base_url if present.
+     * Returns null for legacy tuners that don't have a stored URL.
+     */
+    protected function getStoredHdhrBaseUrl(string $deviceKey, string $playlistUuid): ?string
+    {
+        $tuners = $this->integration->plex_dvr_tuners ?? [];
+
+        foreach ($tuners as $tuner) {
+            if (
+                ($tuner['device_key'] ?? '') === $deviceKey
+                && ($tuner['playlist_uuid'] ?? '') === $playlistUuid
+                && ! empty($tuner['hdhr_base_url'])
+            ) {
+                return $tuner['hdhr_base_url'];
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * Fetch discover.json from the same HDHR base URL we register in Plex.
+     *
+     * @return array{success: bool, data?: array, message?: string}
+     */
+    public function fetchDiscoverPayload(string $hdhrBaseUrl): array
+    {
+        try {
+            $discoverUrl = rtrim($hdhrBaseUrl, '/').'/discover.json';
+            $response = Http::timeout(10)->get($discoverUrl);
+
+            if ($response->successful()) {
+                return [
+                    'success' => true,
+                    'data' => $response->json() ?? [],
+                ];
+            }
+
+            return [
+                'success' => false,
+                'message' => "Could not reach HDHR discover.json (HTTP {$response->status()}) at {$discoverUrl}.",
+            ];
+        } catch (Exception $e) {
+            return [
+                'success' => false,
+                'message' => 'Could not reach HDHR discover.json: '.$e->getMessage(),
+            ];
+        }
+    }
+
+    /**
      * Register an m3u-editor playlist's HDHR endpoint as a DVR tuner in Plex.
      *
      * Follows the correct Plex DVR API flow (as implemented by Headendarr):
@@ -421,21 +492,16 @@ class PlexManagementService
     {
         try {
             // Step 1: Fetch discover.json to get device info (DeviceID, DeviceAuth, etc.)
-            // The hdhrBaseUrl is the external URL for Plex. We build a local URL
-            // to fetch discover.json from ourselves since we host the HDHR endpoint.
-            $parsedHdhr = parse_url($hdhrBaseUrl);
-            $hdhrPath = $parsedHdhr['path'] ?? '';
-            $appPort = config('app.port', 36400);
-            $localDiscoverUrl = "http://localhost:{$appPort}".rtrim($hdhrPath, '/').'/discover.json';
-
-            $discoverResponse = Http::timeout(10)->get($localDiscoverUrl);
-            if (! $discoverResponse->successful()) {
+            // Use the exact HDHR URL that will be registered in Plex so this
+            // follows the same public URL path used elsewhere in the app.
+            $discoverResult = $this->fetchDiscoverPayload($hdhrBaseUrl);
+            if (! $discoverResult['success']) {
                 return [
                     'success' => false,
-                    'message' => "Could not reach HDHR discover.json (HTTP {$discoverResponse->status()}). Ensure the HDHR endpoint is available.",
+                    'message' => $discoverResult['message'],
                 ];
             }
-            $discoverPayload = $discoverResponse->json() ?? [];
+            $discoverPayload = $discoverResult['data'] ?? [];
 
             // Step 2: Create the device in Plex
             $created = $this->tryCreateDevice($hdhrBaseUrl, $discoverPayload);
@@ -569,6 +635,7 @@ class PlexManagementService
                     $tuners[] = [
                         'device_key' => $deviceKey,
                         'playlist_uuid' => $playlistUuid,
+                        'hdhr_base_url' => $hdhrBaseUrl,
                     ];
                 }
                 $this->integration->update([
@@ -1189,9 +1256,28 @@ class PlexManagementService
     public function syncDvrChannelsForTuner(string $deviceKey, string $playlistUuid): array
     {
         try {
+            // Memoize resolvePlaylistUrls so it is called at most once, whether we need it for
+            // the HDHR URL fallback, the EPG URL fallback, or both.
+            $resolvedUrls = null;
+            $resolveUrls = function () use (&$resolvedUrls, $playlistUuid): ?array {
+                return $resolvedUrls ??= $this->resolvePlaylistUrls($playlistUuid);
+            };
+
+            // Prefer the stored HDHR base URL from the tuner entry (set during DVR registration)
+            // so we use the same network path that was verified to work. Fall back to resolving
+            // from PlaylistFacade for legacy tuners that don't have a stored URL.
+            $hdhrBaseUrl = $this->getStoredHdhrBaseUrl($deviceKey, $playlistUuid);
+
+            if (! $hdhrBaseUrl) {
+                $hdhrBaseUrl = $resolveUrls()['hdhr'] ?? null;
+            }
+
+            if (! $hdhrBaseUrl) {
+                return ['success' => false, 'message' => 'Could not resolve playlist HDHR URL.'];
+            }
+
             // Fetch current HDHR lineup from our own endpoint
-            $appPort = config('app.port', 36400);
-            $lineupUrl = "http://localhost:{$appPort}/{$playlistUuid}/hdhr/lineup.json";
+            $lineupUrl = rtrim($hdhrBaseUrl, '/').'/lineup.json';
             $lineupResponse = Http::timeout(15)->get($lineupUrl);
 
             if (! $lineupResponse->successful()) {
@@ -1208,7 +1294,10 @@ class PlexManagementService
 
             if (! $lineupId) {
                 // Fallback: rebuild from our known URL
-                $epgUrl = $this->buildExternalUrl($playlistUuid, 'epg.xml');
+                $epgUrl = $resolveUrls()['epg'] ?? null;
+                if (! $epgUrl) {
+                    return ['success' => false, 'message' => 'Could not resolve playlist EPG URL.'];
+                }
                 $lineupId = $this->buildLineupId($epgUrl);
                 Log::warning('PlexManagementService: Could not get lineup ID from DVR, using fallback', [
                     'integration_id' => $this->integration->id,
@@ -1386,23 +1475,6 @@ class PlexManagementService
 
             return ['success' => false, 'message' => $e->getMessage()];
         }
-    }
-
-    /**
-     * Build an external URL for HDHR/EPG endpoints.
-     * Uses app.url with scheme handling.
-     */
-    protected function buildExternalUrl(string $playlistUuid, string $suffix): string
-    {
-        $appUrl = rtrim(config('app.url'), '/');
-        if (! parse_url($appUrl, PHP_URL_SCHEME)) {
-            $appUrl = 'http://'.$appUrl;
-        }
-        $scheme = parse_url($appUrl, PHP_URL_SCHEME) ?: 'http';
-        $host = parse_url($appUrl, PHP_URL_HOST) ?: 'localhost';
-        $port = parse_url($appUrl, PHP_URL_PORT) ?: config('app.port', 36400);
-
-        return "{$scheme}://{$host}:{$port}/{$playlistUuid}/{$suffix}";
     }
 
     /**
@@ -1673,7 +1745,6 @@ class PlexManagementService
         }
 
         $lineupId = $this->getDvrLineupId();
-        $appPort = config('app.port', 36400);
 
         // Fetch Plex DVR channels (from Device[].ChannelMapping[])
         $plexChannelsResult = $this->getDvrChannels($dvrId);
@@ -1719,8 +1790,32 @@ class PlexManagementService
                 continue;
             }
 
+            // Prefer stored HDHR base URL from tuner entry, fall back to resolving from playlist
+            $hdhrBaseUrl = $deviceKey !== null
+                ? $this->getStoredHdhrBaseUrl($deviceKey, $playlistUuid)
+                : null;
+
+            if (! $hdhrBaseUrl) {
+                $urls = $this->resolvePlaylistUrls($playlistUuid);
+                $hdhrBaseUrl = $urls['hdhr'] ?? null;
+            }
+
+            if (! $hdhrBaseUrl) {
+                $allInSync = false;
+                $tunerReports[] = [
+                    'playlist' => $playlistUuid,
+                    'channels_hdhr' => 0,
+                    'channels_plex' => 0,
+                    'epg_mapped' => 0,
+                    'epg_missing' => 0,
+                    'in_sync' => false,
+                ];
+
+                continue;
+            }
+
             // Fetch HDHR lineup for this tuner
-            $lineupUrl = "http://localhost:{$appPort}/{$playlistUuid}/hdhr/lineup.json";
+            $lineupUrl = rtrim($hdhrBaseUrl, '/').'/lineup.json';
             $hdhrChannelCount = 0;
             $hdhrNumbers = [];
             try {

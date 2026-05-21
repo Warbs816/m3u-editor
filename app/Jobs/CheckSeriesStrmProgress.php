@@ -2,8 +2,11 @@
 
 namespace App\Jobs;
 
+use App\Enums\SyncRunPhase;
+use App\Models\Playlist;
 use App\Models\Series;
 use App\Models\User;
+use App\Services\SyncPipelineService;
 use Filament\Notifications\Notification;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
@@ -29,6 +32,9 @@ class CheckSeriesStrmProgress implements ShouldQueue
         public ?int $playlist_id = null,
         public ?int $user_id = null,
         public bool $needsCleanup = false,
+        public ?array $series_ids = null,
+        public ?int $syncRunId = null,
+        public ?SyncRunPhase $completionPhase = null,
     ) {
         $this->onQueue('file_sync');
     }
@@ -54,6 +60,8 @@ class CheckSeriesStrmProgress implements ShouldQueue
 
             if ($this->needsCleanup) {
                 Log::info('STRM Sync: Dispatching cleanup job');
+                // Pass syncRunId/completionPhase to the cleanup job so it can advance the
+                // pipeline only after media-server refresh and post-process events have fired.
                 dispatch(new SyncSeriesStrmFiles(
                     series: null,
                     notify: $this->notify,
@@ -61,20 +69,36 @@ class CheckSeriesStrmProgress implements ShouldQueue
                     playlist_id: $this->playlist_id,
                     user_id: $this->user_id,
                     isCleanupJob: true,
+                    series_ids: $this->series_ids,
+                    syncRunId: $this->syncRunId,
+                    completionPhase: $this->completionPhase,
                 ));
-            } else {
-                // Send completion notification
-                if ($this->notify && $this->user_id) {
-                    $user = User::find($this->user_id);
-                    if ($user) {
-                        Notification::make()
-                            ->success()
-                            ->title('STRM File Sync Complete')
-                            ->body("Successfully synced {$this->totalSeries} series.")
-                            ->broadcast($user)
-                            ->sendToDatabase($user);
-                    }
+
+                // Legacy path only — pipeline path is advanced by the cleanup job itself.
+                if (! ($this->syncRunId && $this->completionPhase)) {
+                    $this->dispatchSeriesProbe();
                 }
+
+                return;
+            }
+
+            // Send completion notification
+            if ($this->notify && $this->user_id) {
+                $user = User::find($this->user_id);
+                if ($user) {
+                    Notification::make()
+                        ->success()
+                        ->title('STRM File Sync Complete')
+                        ->body("Successfully synced {$this->totalSeries} series.")
+                        ->broadcast($user)
+                        ->sendToDatabase($user);
+                }
+            }
+
+            if ($this->syncRunId && $this->completionPhase) {
+                app(SyncPipelineService::class)->completePhase($this->syncRunId, $this->completionPhase);
+            } else {
+                $this->dispatchSeriesProbe();
             }
 
             return;
@@ -98,11 +122,12 @@ class CheckSeriesStrmProgress implements ShouldQueue
                 batchOffset: $offset,
                 totalBatches: $totalBatches,
                 currentBatch: $batchNumber,
+                series_ids: $this->series_ids,
             );
         }
 
         // Add checker as last job in chain
-        $nextOffset = $seriesProcessed + ($jobsInThisChain * $batchSize);
+        $nextOffset = min($seriesProcessed + ($jobsInThisChain * $batchSize), $this->totalSeries);
         $jobs[] = new self(
             currentOffset: $nextOffset,
             totalSeries: $this->totalSeries,
@@ -111,6 +136,9 @@ class CheckSeriesStrmProgress implements ShouldQueue
             playlist_id: $this->playlist_id,
             user_id: $this->user_id,
             needsCleanup: $this->needsCleanup,
+            series_ids: $this->series_ids,
+            syncRunId: $this->syncRunId,
+            completionPhase: $this->completionPhase,
         );
 
         Log::info('STRM Sync: Dispatching next chain', [
@@ -119,5 +147,29 @@ class CheckSeriesStrmProgress implements ShouldQueue
         ]);
 
         Bus::chain($jobs)->dispatch();
+    }
+
+    private function dispatchSeriesProbe(): void
+    {
+        if ($this->playlist_id) {
+            $playlist = Playlist::find($this->playlist_id);
+            if ($playlist?->auto_probe_vod_streams) {
+                Log::info("STRM Sync: Dispatching series/VOD probe for playlist {$this->playlist_id}");
+                dispatch(new ProbeVodStreams($this->playlist_id));
+            }
+
+            return;
+        }
+
+        if ($this->all_playlists && $this->user_id) {
+            $playlistIds = Playlist::where('user_id', $this->user_id)
+                ->where('auto_probe_vod_streams', true)
+                ->pluck('id');
+
+            foreach ($playlistIds as $playlistId) {
+                Log::info("STRM Sync: Dispatching series/VOD probe for playlist {$playlistId}");
+                dispatch(new ProbeVodStreams($playlistId));
+            }
+        }
     }
 }

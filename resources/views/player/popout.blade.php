@@ -111,33 +111,37 @@
                 </div>
             </div>
 
-            <div class="absolute top-2 left-2 opacity-0 group-hover:opacity-100 transition-opacity duration-200">
+            <div
+                class="absolute top-2 left-2 opacity-0 group-hover:opacity-100 transition-opacity duration-200 flex gap-1">
                 <button type="button" onclick="toggleStreamDetails('popout-player')"
                     class="rounded bg-black/75 hover:bg-black/90 px-2 py-1 text-xs text-white transition-colors"
                     title="Toggle Stream Details">
                     <x-heroicon-o-information-circle class="w-4 h-4" />
                 </button>
+                <button type="button" id="popout-pip-btn" onclick="togglePopoutPiP()"
+                    class="rounded bg-black/75 hover:bg-black/90 px-2 py-1 text-xs text-white transition-colors"
+                    title="Picture-in-Picture" style="display: none;">
+                    <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                        stroke-linecap="round" stroke-linejoin="round">
+                        <rect x="2" y="3" width="20" height="14" rx="2" />
+                        <rect x="12" y="9" width="8" height="6" rx="1" fill="currentColor" />
+                    </svg>
+                </button>
             </div>
 
             <!-- Resume Prompt (VOD / Episode) -->
-            <div
-                id="popout-player-resume"
-                class="absolute bottom-14 left-0 right-0 flex justify-center px-4 hidden z-20"
-            >
-                <div class="bg-gray-900/95 text-white rounded-lg px-4 py-2 flex items-center gap-3 shadow-xl text-sm max-w-sm">
+            <div id="popout-player-resume"
+                class="absolute bottom-14 left-0 right-0 flex justify-center px-4 hidden z-20">
+                <div
+                    class="bg-gray-900/95 text-white rounded-lg px-4 py-2 flex items-center gap-3 shadow-xl text-sm max-w-sm">
                     <x-heroicon-o-clock class="w-4 h-4 text-blue-400 flex-shrink-0" />
                     <span id="popout-player-resume-time" class="flex-1">Resume from 0:00</span>
-                    <button
-                        type="button"
+                    <button type="button"
                         onclick="document.getElementById('popout-player')._streamPlayer?.resumeFromSaved()"
-                        class="px-3 py-1 bg-blue-600 hover:bg-blue-700 rounded text-xs transition-colors flex-shrink-0"
-                    >Resume</button>
-                    <button
-                        type="button"
-                        onclick="document.getElementById('popout-player')._streamPlayer?.startOver()"
+                        class="px-3 py-1 bg-blue-600 hover:bg-blue-700 rounded text-xs transition-colors flex-shrink-0">Resume</button>
+                    <button type="button" onclick="document.getElementById('popout-player')._streamPlayer?.startOver()"
                         class="text-gray-400 hover:text-white transition-colors flex-shrink-0"
-                        title="Start from beginning"
-                    >
+                        title="Start from beginning">
                         <x-heroicon-o-x-mark class="w-4 h-4" />
                     </button>
                 </div>
@@ -159,26 +163,64 @@
             const streamUrl = videoElement.dataset.url ?? '';
             const streamFormat = videoElement.dataset.format ?? 'ts';
 
+            // Inherit the client_id from the floating player if this popout was
+            // opened via "open in new tab", so the proxy sees an uninterrupted
+            // connection. Fall back to a fresh id for direct popout loads.
+            const urlParams = new URLSearchParams(window.location.search);
+            const popoutClientId = urlParams.get('client_id') ?? 'popout-' + Math.random().toString(36).substring(2, 9);
+            const clientIdSep = streamUrl.includes('?') ? '&' : '?';
+            const streamUrlWithClientId = streamUrl + clientIdSep + 'client_id=' + encodeURIComponent(popoutClientId);
+
             const player = window.streamPlayer();
-            player.initPlayer(streamUrl, streamFormat, 'popout-player');
+            player.initPlayer(streamUrlWithClientId, streamFormat, 'popout-player');
 
-            window.addEventListener('beforeunload', () => {
+            // Show PiP button if supported
+            if (document.pictureInPictureEnabled) {
+                const pipBtn = document.getElementById('popout-pip-btn');
+                if (pipBtn) pipBtn.style.display = '';
+            }
+
+            window.togglePopoutPiP = function () {
+                if (document.pictureInPictureElement === videoElement) {
+                    document.exitPictureInPicture().catch(() => { });
+                } else if (document.pictureInPictureEnabled) {
+                    videoElement.requestPictureInPicture().catch(() => { });
+                }
+            };
+
+            // Unified cleanup for page unload (beforeunload + pagehide for
+            // mobile Safari). Runs once to avoid duplicate proxy stop
+            // requests and double media teardown.
+            const streamType = (videoElement.dataset.contentType === 'episode') ? 'episode' : 'channel';
+            let popoutFinalized = false;
+            function finalizePopoutSession() {
+                if (popoutFinalized) return;
+                popoutFinalized = true;
+
+                if (window.notifyProxyStreamStop) {
+                    window.notifyProxyStreamStop(
+                        videoElement.dataset.streamId || '',
+                        streamType,
+                        popoutClientId,
+                    );
+                }
                 if (typeof player.cleanup === 'function') {
                     player.cleanup();
                 }
-            });
+            }
 
-            window.addEventListener('pagehide', () => {
-                if (typeof player.cleanup === 'function') {
-                    player.cleanup();
-                }
-            });
+            window.addEventListener('beforeunload', finalizePopoutSession);
+            window.addEventListener('pagehide', finalizePopoutSession);
 
             document.addEventListener('visibilitychange', () => {
+                const isLive = videoElement.dataset.contentType === 'live';
+                if (isLive) {
+                    return;
+                }
                 if (document.visibilityState === 'hidden') {
                     videoElement.pause();
                 } else if (document.visibilityState === 'visible') {
-                    videoElement.play().catch(() => {});
+                    videoElement.play().catch(() => { });
                 }
             });
         });

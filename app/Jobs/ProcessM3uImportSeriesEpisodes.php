@@ -2,8 +2,12 @@
 
 namespace App\Jobs;
 
+use App\Enums\Status;
+use App\Enums\SyncRunPhase;
+use App\Models\Playlist;
 use App\Models\Series;
 use App\Models\User;
+use App\Services\SyncPipelineService;
 use App\Settings\GeneralSettings;
 use App\Traits\ProviderRequestDelay;
 use Filament\Notifications\Notification;
@@ -37,9 +41,10 @@ class ProcessM3uImportSeriesEpisodes implements ShouldQueue
         public bool $overwrite_existing = false,
         public ?int $user_id = null,
         public ?bool $sync_stream_files = true,
-        public ?int $batchOffset = null,  // For batch processing: starting offset
-        public ?int $totalBatches = null, // For tracking progress
-        public ?int $currentBatch = null, // Current batch number (1-indexed)
+        public ?int $batchOffset = null,
+        public ?int $totalBatches = null,
+        public ?int $currentBatch = null,
+        public ?int $syncRunId = null,
     ) {}
 
     /**
@@ -100,6 +105,25 @@ class ProcessM3uImportSeriesEpisodes implements ShouldQueue
         if ($totalCount === 0) {
             Log::info('Series Sync: No series to process');
 
+            if ($this->playlist_id) {
+                $playlist = Playlist::find($this->playlist_id);
+                if ($playlist) {
+                    $playlist->update([
+                        'processing' => [
+                            ...$playlist->processing ?? [],
+                            'series_processing' => false,
+                        ],
+                        'status' => Status::Completed,
+                        'series_progress' => 100,
+                    ]);
+                }
+            }
+
+            // Advance the pipeline so the run is not left stuck in running.
+            if ($this->syncRunId) {
+                app(SyncPipelineService::class)->completePhase($this->syncRunId, SyncRunPhase::SeriesMetadata);
+            }
+
             return;
         }
 
@@ -149,6 +173,7 @@ class ProcessM3uImportSeriesEpisodes implements ShouldQueue
             overwrite_existing: $this->overwrite_existing,
             user_id: $this->user_id,
             sync_stream_files: $this->sync_stream_files,
+            syncRunId: $this->syncRunId,
         );
 
         // Dispatch the chain
@@ -251,7 +276,8 @@ class ProcessM3uImportSeriesEpisodes implements ShouldQueue
             // Check if the playlist has .strm file sync enabled
             $sync_settings = $series->sync_settings;
             $syncStrmFiles = $settings['enabled'] ?? $sync_settings['enabled'] ?? false;
-            $body = "Series sync completed successfully for \"{$series->name}\". Imported {$results} episodes.";
+            $episodeCount = $series->episodes()->count();
+            $body = "Series sync completed successfully for \"{$series->name}\". Imported {$episodeCount} episodes.";
             if ($syncStrmFiles) {
                 $body .= ' .strm file sync is enabled, syncing now.';
             } else {

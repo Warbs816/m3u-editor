@@ -1,6 +1,7 @@
 <?php
 
 use App\Models\MediaServerIntegration;
+use App\Models\Playlist;
 use App\Models\User;
 use App\Services\PlexManagementService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -27,6 +28,12 @@ beforeEach(function () {
             'plex_management_enabled' => true,
         ]);
     });
+
+    // Create playlist fixtures so resolvePlaylistUrls() can resolve them
+    Playlist::factory()->create(['uuid' => 'test-uuid', 'user_id' => $this->user->id]);
+    Playlist::factory()->create(['uuid' => 'test-uuid-2', 'user_id' => $this->user->id]);
+    Playlist::factory()->create(['uuid' => 'playlist-abc', 'user_id' => $this->user->id]);
+    Playlist::factory()->create(['uuid' => 'playlist-uuid-abc', 'user_id' => $this->user->id]);
 });
 
 it('throws exception for non-plex integration', function () {
@@ -262,6 +269,32 @@ it('can get DVR configurations', function () {
     expect($result['data']->first()['device_count'])->toBe(1);
 });
 
+it('prefers the provided hdhr url when fetching discover json', function () {
+    $requestedUrls = [];
+
+    Http::fake(function ($request) use (&$requestedUrls) {
+        $requestedUrls[] = $request->url();
+
+        return match ($request->url()) {
+            'https://iptv.chorkley.uk/test-playlist-uuid/hdhr/discover.json' => Http::response([
+                'DeviceID' => 'hdhr-device-123',
+                'DeviceAuth' => 'auth-abc',
+            ]),
+            default => Http::response(null, 500),
+        };
+    });
+
+    $service = new PlexManagementService($this->integration);
+
+    $result = $service->fetchDiscoverPayload('https://iptv.chorkley.uk/test-playlist-uuid/hdhr');
+
+    expect($result['success'])->toBeTrue();
+    expect($result['data']['DeviceID'])->toBe('hdhr-device-123');
+    expect($requestedUrls)->toContain('https://iptv.chorkley.uk/test-playlist-uuid/hdhr/discover.json');
+    expect($requestedUrls)->not->toContain('http://localhost:443/test-playlist-uuid/hdhr/discover.json');
+    expect($requestedUrls)->not->toContain('http://127.0.0.1:443/test-playlist-uuid/hdhr/discover.json');
+});
+
 it('can register a DVR device', function () {
     $devicesCallCount = 0;
     $dvrsCallCount = 0;
@@ -269,7 +302,7 @@ it('can register a DVR device', function () {
     Http::fake(function ($request) use (&$devicesCallCount, &$dvrsCallCount) {
         $url = $request->url();
 
-        // Step 1: discover.json fetched via local app URL
+        // Step 1: discover.json fetched via the configured HDHR URL
         if (str_contains($url, '/hdhr/discover.json')) {
             return Http::response([
                 'DeviceID' => 'hdhr-device-123',
@@ -1217,4 +1250,232 @@ it('verifies DVR sync detects stale DVR', function () {
     // Verify local state was cleaned up
     $this->integration->refresh();
     expect($this->integration->plex_dvr_id)->toBeNull();
+});
+
+it('verifyDvrSync uses stored hdhr_base_url from tuner entry', function () {
+    $storedUrl = 'http://172.18.0.5:36400/test-uuid/hdhr';
+
+    $this->integration->update([
+        'plex_dvr_id' => '42',
+        'plex_dvr_tuners' => [
+            [
+                'device_key' => 'device-1',
+                'playlist_uuid' => 'test-uuid',
+                'hdhr_base_url' => $storedUrl,
+            ],
+        ],
+    ]);
+
+    $lineupFetched = false;
+
+    Http::fake(function ($request) use ($storedUrl, &$lineupFetched) {
+        $url = $request->url();
+
+        // DVR detail (getDvrChannels)
+        if (preg_match('#/livetv/dvrs/42$#', parse_url($url, PHP_URL_PATH) ?? '')) {
+            return Http::response(['MediaContainer' => ['Dvr' => [
+                ['key' => '42', 'Lineup' => [
+                    ['id' => 'lineup://tv.plex.providers.epg.xmltv/test', 'title' => 'XMLTV Guide'],
+                ], 'Device' => [['key' => 'device-1', 'ChannelMapping' => [
+                    ['channelKey' => '1', 'deviceIdentifier' => '1', 'enabled' => '1', 'lineupIdentifier' => '1'],
+                ]]]],
+            ]]]);
+        }
+
+        // DVR list (verifyDvrExists + getDvrLineupId)
+        if (str_contains($url, '/livetv/dvrs') && ! str_contains($url, 'lineupchannels')) {
+            return Http::response(['MediaContainer' => ['Dvr' => [
+                ['key' => '42', 'Lineup' => [
+                    ['id' => 'lineup://tv.plex.providers.epg.xmltv/test', 'title' => 'XMLTV Guide'],
+                ], 'Device' => [['key' => 'device-1']]],
+            ]]]);
+        }
+
+        if (str_contains($url, '/livetv/epg/lineupchannels')) {
+            return Http::response(['MediaContainer' => ['Lineup' => [
+                ['Channel' => [['channelVcn' => '1', 'identifier' => 'ch-1', 'key' => '1']]],
+            ]]]);
+        }
+
+        // HDHR lineup — must be fetched from the stored Docker-internal URL, not a resolved route
+        if ($url === $storedUrl.'/lineup.json') {
+            $lineupFetched = true;
+
+            return Http::response([
+                ['GuideNumber' => '1', 'GuideName' => 'Channel 1', 'URL' => 'http://test/1'],
+            ]);
+        }
+
+        return Http::response([], 200);
+    });
+
+    $service = PlexManagementService::make($this->integration);
+    $result = $service->verifyDvrSync();
+
+    expect($lineupFetched)->toBeTrue('Expected lineup to be fetched from stored hdhr_base_url');
+    expect($result['success'])->toBeTrue();
+});
+
+it('stores hdhr_base_url in tuner entry when adding DVR device', function () {
+    $hdhrBaseUrl = 'http://172.18.0.5:36400/test-uuid/hdhr';
+
+    Http::fake(function ($request) use ($hdhrBaseUrl) {
+        $url = $request->url();
+
+        // discover.json
+        if (str_contains($url, '/discover.json')) {
+            return Http::response([
+                'DeviceID' => 'test1234',
+                'FriendlyName' => 'Test HDHomeRun',
+                'DeviceAuth' => 'auth-token',
+                'BaseURL' => $hdhrBaseUrl,
+                'LineupURL' => $hdhrBaseUrl.'/lineup.json',
+                'TunerCount' => 2,
+            ]);
+        }
+
+        // Plex device creation - return success
+        if (str_contains($url, '/media/grabbers/devices')) {
+            return Http::response(['MediaContainer' => [
+                'Device' => [[
+                    'key' => 'device-abc',
+                    'uuid' => 'device-uuid-abc',
+                    'uri' => $hdhrBaseUrl,
+                    'parentID' => null,
+                ]],
+            ]]);
+        }
+
+        // DVR listing
+        if (str_contains($url, '/livetv/dvrs')) {
+            if ($request->method() === 'POST') {
+                return Http::response(['MediaContainer' => ['Dvr' => [['key' => 'dvr-42']]]]);
+            }
+
+            return Http::response(['MediaContainer' => ['Dvr' => [[
+                'key' => 'dvr-42',
+                'Device' => [['key' => 'device-abc', 'uuid' => 'device-uuid-abc']],
+            ]]]]);
+        }
+
+        // EPG refresh, lineup channels, channel map — return success stubs
+        if (str_contains($url, '/lineup.json')) {
+            return Http::response([['GuideNumber' => '1', 'GuideName' => 'Test', 'URL' => 'http://test/stream']]);
+        }
+
+        if (str_contains($url, '/lineupchannels')) {
+            return Http::response(['MediaContainer' => ['Directory' => []]]);
+        }
+
+        return Http::response([], 200);
+    });
+
+    $service = PlexManagementService::make($this->integration);
+    $result = $service->addDvrDevice($hdhrBaseUrl, 'http://172.18.0.5:36400/epg/test-uuid', 'us', 'en', 'test-uuid');
+
+    expect($result['success'])->toBeTrue();
+
+    $this->integration->refresh();
+    $tuners = $this->integration->plex_dvr_tuners;
+
+    expect($tuners)->toBeArray();
+    expect($tuners)->toHaveCount(1);
+    expect($tuners[0])->toHaveKey('hdhr_base_url');
+    expect($tuners[0]['hdhr_base_url'])->toBe($hdhrBaseUrl);
+    expect($tuners[0]['playlist_uuid'])->toBe('test-uuid');
+});
+
+it('syncDvrChannelsForTuner uses stored hdhr_base_url from tuner entry', function () {
+    $storedUrl = 'http://172.18.0.5:36400/test-uuid/hdhr';
+
+    $this->integration->update([
+        'plex_dvr_id' => 'dvr-42',
+        'plex_dvr_tuners' => [
+            [
+                'device_key' => 'device-abc',
+                'playlist_uuid' => 'test-uuid',
+                'hdhr_base_url' => $storedUrl,
+            ],
+        ],
+    ]);
+
+    $lineupFetched = false;
+
+    Http::fake(function ($request) use ($storedUrl, &$lineupFetched) {
+        $url = $request->url();
+
+        // The stored URL should be used for lineup fetch
+        if ($url === $storedUrl.'/lineup.json') {
+            $lineupFetched = true;
+
+            return Http::response([
+                ['GuideNumber' => '1', 'GuideName' => 'Channel 1', 'URL' => 'http://test/1.ts'],
+            ]);
+        }
+
+        // DVR info
+        if (str_contains($url, '/livetv/dvrs')) {
+            return Http::response(['MediaContainer' => ['Dvr' => [[
+                'key' => 'dvr-42',
+                'Lineup' => [['id' => 'lineup://test']],
+                'Device' => [['key' => 'device-abc']],
+            ]]]]);
+        }
+
+        // Lineup channels, device scan, channel map
+        if (str_contains($url, '/lineupchannels')) {
+            return Http::response(['MediaContainer' => ['Directory' => []]]);
+        }
+
+        return Http::response([], 200);
+    });
+
+    $service = PlexManagementService::make($this->integration);
+    $result = $service->syncDvrChannelsForTuner('device-abc', 'test-uuid');
+
+    expect($lineupFetched)->toBeTrue('Expected lineup to be fetched from stored hdhr_base_url');
+});
+
+it('syncDvrChannelsForTuner falls back to PlaylistFacade for legacy tuners without hdhr_base_url', function () {
+    $this->integration->update([
+        'plex_dvr_id' => 'dvr-42',
+        'plex_dvr_tuners' => [
+            [
+                'device_key' => 'device-abc',
+                'playlist_uuid' => 'test-uuid',
+                // No hdhr_base_url — legacy tuner
+            ],
+        ],
+    ]);
+
+    Http::fake(function ($request) {
+        $url = $request->url();
+
+        // Should fall back to PlaylistFacade-resolved URL (which uses route())
+        if (str_contains($url, '/lineup.json')) {
+            return Http::response([
+                ['GuideNumber' => '1', 'GuideName' => 'Channel 1', 'URL' => 'http://test/1.ts'],
+            ]);
+        }
+
+        if (str_contains($url, '/livetv/dvrs')) {
+            return Http::response(['MediaContainer' => ['Dvr' => [[
+                'key' => 'dvr-42',
+                'Lineup' => [['id' => 'lineup://test']],
+                'Device' => [['key' => 'device-abc']],
+            ]]]]);
+        }
+
+        if (str_contains($url, '/lineupchannels')) {
+            return Http::response(['MediaContainer' => ['Directory' => []]]);
+        }
+
+        return Http::response([], 200);
+    });
+
+    $service = PlexManagementService::make($this->integration);
+    $result = $service->syncDvrChannelsForTuner('device-abc', 'test-uuid');
+
+    // Should not fail — fallback should work
+    expect($result)->toHaveKey('success');
 });
