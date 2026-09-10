@@ -684,6 +684,7 @@ class PlaylistResource extends Resource implements CopilotResource
                     ->modalIcon('heroicon-o-document-duplicate')
                     ->modalDescription(__('Duplicate playlist now?'))
                     ->modalSubmitActionLabel(__('Yes, duplicate now')),
+                self::getExportAction(),
                 Action::make('reset')
                     ->label(__('Reset status'))
                     ->icon('heroicon-o-arrow-uturn-left')
@@ -3827,6 +3828,21 @@ class PlaylistResource extends Resource implements CopilotResource
             ->default(false);
     }
 
+    /**
+     * Download the playlist as a portable export file that can be imported
+     * into another m3u editor instance.
+     */
+    public static function getExportAction(): Action
+    {
+        return Action::make('export')
+            ->label(__('Export'))
+            ->tooltip(__('Download this playlist (settings, groups, channels, series and EPG mappings) as a file that can be imported into another m3u editor instance. NOTE: The file includes the playlist source URL, Xtream credentials and stream URLs, so only share it with people you trust.'))
+            ->hidden(fn ($record): bool => $record->is_network_playlist || $record->isMediaServerPlaylist())
+            ->icon('heroicon-o-arrow-up-tray')
+            ->url(fn ($record): string => route('playlists.export', $record))
+            ->openUrlInNewTab();
+    }
+
     private static function getPlaylistActionSchema(): array
     {
         return [
@@ -4041,6 +4057,7 @@ class PlaylistResource extends Resource implements CopilotResource
                     ->modalDescription(__('Duplicate playlist now?'))
                     ->modalSubmitActionLabel(__('Yes, duplicate now'))
                     ->hidden(fn ($record): bool => $record->is_network_playlist || $record->isMediaServerPlaylist()),
+                self::getExportAction(),
                 Action::make('Copy Changes')
                     ->label(__('Copy Changes'))
                     ->schema([
