@@ -225,8 +225,8 @@ it('exports a playlist without any instance specific ids', function () {
 });
 
 it('keeps a disabled channel only when something about it would not survive a sync', function (array $attributes) {
-    $playlist = Playlist::factory()->create(['user_id' => $this->user->id, 'name' => 'Rules']);
-    $group = Group::factory()->create(['user_id' => $this->user->id, 'playlist_id' => $playlist->id, 'name' => 'G', 'name_internal' => 'G']);
+    $playlist = Playlist::factory()->create(['user_id' => $this->user->id, 'name' => 'Rules', 'enable_channels' => false]);
+    $group = Group::factory()->create(['user_id' => $this->user->id, 'playlist_id' => $playlist->id, 'name' => 'G', 'name_internal' => 'G', 'enabled' => false]);
     $defaults = ['user_id' => $this->user->id, 'playlist_id' => $playlist->id, 'group_id' => $group->id, 'group' => 'G', 'group_internal' => 'G', 'logo' => null, 'enabled' => false];
 
     Channel::factory()->create(['name' => 'plain', 'title' => 'plain'] + $defaults);
@@ -246,6 +246,19 @@ it('keeps a disabled channel only when something about it would not survive a sy
     'custom channel' => [['is_custom' => true]],
 ]);
 
+it('keeps disabled channels the next sync would switch on', function (bool $playlistEnablesAll, bool $groupEnabled) {
+    $playlist = Playlist::factory()->create(['user_id' => $this->user->id, 'name' => 'Rules', 'enable_channels' => $playlistEnablesAll]);
+    $group = Group::factory()->create(['user_id' => $this->user->id, 'playlist_id' => $playlist->id, 'name' => 'G', 'name_internal' => 'G', 'enabled' => $groupEnabled]);
+    Channel::factory()->create(['name' => 'off', 'title' => 'off', 'user_id' => $this->user->id, 'playlist_id' => $playlist->id, 'group_id' => $group->id, 'group' => 'G', 'group_internal' => 'G', 'logo' => null, 'enabled' => false]);
+
+    $export = decodeExport(file_get_contents(exportToTempFile($this->service, $playlist)));
+
+    expect(collect($export['channel'] ?? [])->pluck('name')->all())->toBe(['off']);
+})->with([
+    'group enabled' => [false, true],
+    'playlist enables all new channels' => [true, false],
+]);
+
 it('imports an export as a new playlist for another user and re-links EPG mappings by url', function () {
     $path = exportToTempFile($this->service, makeExportablePlaylist($this->user));
 
@@ -259,7 +272,8 @@ it('imports an export as a new playlist for another user and re-links EPG mappin
         ->and($imported->name)->toBe('Imported Playlist')
         ->and($imported->uuid)->not->toBeEmpty()
         ->and($imported->status)->toBe(Status::Completed)
-        ->and($imported->processing)->toBeFalse()
+        ->and($imported->processing)->toBe(['live_processing' => false, 'vod_processing' => false, 'series_processing' => false])
+        ->and($imported->isProcessing())->toBeFalse()
         ->and($imported->url)->toBe('http://provider.test/get.php')
         ->and($imported->xtream_config['password'])->toBe('p')
         ->and($imported->import_prefs)->toBe(['selected_groups' => ['News']])

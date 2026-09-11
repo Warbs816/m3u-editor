@@ -46,9 +46,11 @@ use JsonException;
  *
  * Only channels that carry something the next provider sync would not
  * recreate are exported: enabled channels, custom channels, channels with
- * user overrides or an EPG link, and both ends of every failover. A disabled
- * provider channel with nothing changed is left out, since the sync matches
- * channels by source id and recreates it identically.
+ * user overrides or an EPG link, both ends of every failover, and disabled
+ * channels the sync would switch back on because their group is enabled. A
+ * disabled provider channel with nothing changed, in a group that is not
+ * enabled, is left out, since the sync matches channels by source id and
+ * recreates it identically.
  *
  * @phpstan-type TransferHeader array{format: string, version: int, app_version: string|null, exported_at: string}
  * @phpstan-type TransferRecord array{type: string, data: array<string, mixed>}
@@ -234,11 +236,14 @@ class PlaylistTransferService
             ->pluck('channel_failover_id')
             ->flip()
             ->all();
+        $enabledGroupIds = $playlist->enable_channels
+            ? null
+            : $playlist->groups()->where('enabled', true)->pluck('id')->flip()->all();
         $channels = $playlist->channels()
             ->with(['failovers', 'epgChannel:id,epg_id,name,channel_id'])
             ->lazyById(1000);
         foreach ($channels as $channel) {
-            if ($this->shouldExportChannel($channel, $failoverTargetIds)) {
+            if ($this->shouldExportChannel($channel, $failoverTargetIds, $enabledGroupIds)) {
                 yield $this->record('channel', $this->exportChannel($channel));
             }
         }
@@ -355,7 +360,11 @@ class PlaylistTransferService
             'uuid' => Str::orderedUuid()->toString(),
             'user_id' => $import->user->id,
             'status' => Status::Completed,
-            'processing' => false,
+            'processing' => [
+                'live_processing' => false,
+                'vod_processing' => false,
+                'series_processing' => false,
+            ],
             'synced' => $now,
             'errors' => null,
             'progress' => 100,
@@ -581,14 +590,20 @@ class PlaylistTransferService
 
     /**
      * Whether the next provider sync would fail to recreate this channel as it
-     * is now. Anything the user changed, linked or enabled must travel; a
-     * disabled provider channel with nothing changed does not.
+     * is now. Anything the user changed, linked or enabled must travel. So must
+     * a disabled channel the sync would switch on: new channels are enabled
+     * when their group is enabled, or when the playlist enables everything.
+     * Only a disabled provider channel with nothing changed, in a group that
+     * is not enabled, is left out.
      *
      * @param  array<int, int>  $failoverTargetIds  ids of channels used as a failover by another channel
+     * @param  array<int, int>|null  $enabledGroupIds  ids of enabled groups, or null when the playlist enables all new channels
      */
-    protected function shouldExportChannel(Channel $channel, array $failoverTargetIds): bool
+    protected function shouldExportChannel(Channel $channel, array $failoverTargetIds, ?array $enabledGroupIds): bool
     {
         return $channel->enabled
+            || $enabledGroupIds === null
+            || ($channel->group_id !== null && isset($enabledGroupIds[$channel->group_id]))
             || $channel->is_custom
             || $channel->failovers->isNotEmpty()
             || isset($failoverTargetIds[$channel->id])
